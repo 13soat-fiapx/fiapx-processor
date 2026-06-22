@@ -1,0 +1,77 @@
+name: CI/CD Pipeline
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - release
+      - develop
+  pull_request:
+    branches:
+      - main
+      - release
+      - develop
+
+permissions:
+  contents: read
+  actions: read
+  checks: write
+
+jobs:
+  tests:
+    name: Run tests
+    uses: 13soat-fiapx/fiapx-infra/.github/workflows/dotnet-tests.yml@main
+    with:
+      enable_sonar: ${{ (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'workflow_dispatch' && github.ref_name == 'main') }}
+      sonar_project_key: "fiapx-${{ vars.SERVICE_NAME }}"
+    secrets: inherit
+
+  resolve-environment:
+    name: Resolve environment name
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.resolve.outputs.environment }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+      - name: Resolve Environment
+        id: resolve
+        uses: 13soat-fiapx/fiapx-infra/.github/actions/resolve-environment@main
+
+  resolve-queue-url:
+    name: Resolve queue URL
+    needs:
+      - resolve-environment
+    runs-on: ubuntu-latest
+    outputs:
+      queue-url: ${{ steps.get-queue-url.outputs.queue-url }}
+    steps:
+      - name: Configure AWS Credentials
+        id: aws-credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Get queue URL
+        id: get-queue-url
+        uses: 13soat-fiapx/fiapx-infra/.github/actions/get-sqs-queue-url@main
+        with:
+          queue-name: video-processing-requested
+          environment: ${{ needs.resolve-environment.outputs.environment }}
+
+  deploy:
+    name: Deploy Helm
+    needs:
+      - tests
+      - resolve-environment
+      - resolve-queue-url
+    uses: 13soat-fiapx/fiapx-infra/.github/workflows/deploy-helm.yml@main
+    with:
+      environment: ${{ needs.resolve-environment.outputs.environment }}
+      service-name: ${{ vars.SERVICE_NAME }}
+      additional-args: "--set queue.url=${{ needs.resolve-queue-url.outputs.queue-url }}"
+    secrets: inherit

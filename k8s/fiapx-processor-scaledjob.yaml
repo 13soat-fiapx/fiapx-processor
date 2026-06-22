@@ -1,0 +1,33 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledJob
+metadata:
+  name: fiapx-processor
+spec:
+  pollingInterval: 5
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  maxReplicaCount: 10
+  jobTargetRef:
+    backoffLimit: 2
+    template:
+      spec:
+        restartPolicy: Never
+        containers:
+          - name: fiapx-processor
+            image: fiapx-processor:latest
+            imagePullPolicy: IfNotPresent
+            command: ["bun", "run", "worker"]
+            envFrom:
+              - configMapRef:
+                  name: fiapx-processor-config
+              - secretRef:
+                  name: fiapx-processor-aws
+  triggers:
+    - type: aws-sqs-queue
+      authenticationRef:
+        name: fiapx-processor-aws-auth
+      metadata:
+        queueURLFromEnv: SQS_QUEUE_URL
+        queueLength: "1"
+        awsRegion: us-east-1
+        awsEndpoint: http://localstack:4566
