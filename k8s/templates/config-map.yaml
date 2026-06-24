@@ -6,6 +6,9 @@ metadata:
 
 data:
   AWS_REGION: {{ .Values.aws.region | quote }}
-  SQS_QUEUE_URL: {{ .Values.queue.url | required "Parameter queue.url is required." | quote }}
-  S3_BUCKET: "{{ .Values.app.project }}-{{ .Values.app.env }}-{{ .Values.s3.bucket }}"
-  FRAME_PREFIX: {{ .Values.framePrefix | quote }}
+  SQS_QUEUE_NAMES_{{ .Values.queue.event }}: "{{ .Values.app.project }}-{{ .Values.app.env }}-{{ .Values.queue.name }}"
+  {{- range $key, $value := .Values.queueNames }}
+  SQS_QUEUE_NAMES_{{ $key }}: "{{ $.Values.app.project }}-{{ $.Values.app.env }}-{{ $value }}"
+  {{- end }}
+  S3_BUCKET: "{{ .Values.app.project }}-{{ .Values.app.env }}-{{ .Values.bucket.name }}"
+  FRAME_PREFIX: {{ .Values.bucket.framePrefix | quote }}

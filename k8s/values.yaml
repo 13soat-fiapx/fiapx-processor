@@ -12,14 +12,16 @@ aws:
   region: us-east-1
 
 queue:
-  event: VideoProcessingRequested
+  event: VIDEO_PROCESSING_REQUESTED
   name: "video-processing-requested"
   url: ""
 
-s3:
-  bucket: "videos"
+queueNames:
+  VIDEO_PROCESSING_COMPLETED: "video-processing-completed"
 
-framePrefix: "frames"
+bucket:
+  name: "videos"
+  framePrefix: "frames"
 
 secrets:
   clusterSecretStore: fiapx-aws-secrets
