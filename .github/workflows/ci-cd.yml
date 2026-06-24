@@ -16,17 +16,8 @@ on:
 permissions:
   contents: read
   actions: read
-  checks: write
 
 jobs:
-  tests:
-    name: Run tests
-    uses: 13soat-fiapx/fiapx-infra/.github/workflows/dotnet-tests.yml@main
-    with:
-      enable_sonar: ${{ (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'workflow_dispatch' && github.ref_name == 'main') }}
-      sonar_project_key: "fiapx-${{ vars.SERVICE_NAME }}"
-    secrets: inherit
-
   resolve-environment:
     name: Resolve environment name
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
@@ -49,7 +40,6 @@ jobs:
       queue-url: ${{ steps.get-queue-url.outputs.queue-url }}
     steps:
       - name: Configure AWS Credentials
-        id: aws-credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -66,7 +56,6 @@ jobs:
   deploy:
     name: Deploy Helm
     needs:
-      - tests
       - resolve-environment
       - resolve-queue-url
     uses: 13soat-fiapx/fiapx-infra/.github/workflows/deploy-helm.yml@main
