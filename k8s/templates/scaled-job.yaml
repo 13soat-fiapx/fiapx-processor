@@ -1,0 +1,46 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledJob
+
+metadata:
+  name: {{ .Values.app.name }}
+
+spec:
+  jobTargetRef:
+    template:
+      spec:
+        containers:
+          - name: {{ .Values.app.name }}
+            image: {{ .Values.image.repository | required "Parameter image.repository is required." }}:{{ .Values.image.tag }}
+            imagePullPolicy: Always
+
+            envFrom:
+              - configMapRef:
+                  name: {{ .Values.app.name }}-configs
+
+            env:
+              - name: AWS_ACCESS_KEY_ID
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ .Values.app.name }}-aws
+                    key: access-key-id
+              - name: AWS_SECRET_ACCESS_KEY
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ .Values.app.name }}-aws
+                    key: secret-access-key
+              - name: AWS_SESSION_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ .Values.app.name }}-aws
+                    key: session-token
+
+        restartPolicy: Never
+
+  triggers:
+    - type: aws-sqs-queue
+      metadata:
+        queueURL: {{ .Values.queue.url | required "Parameter queue.url is required." | quote }}
+        queueLength: "1"
+        awsRegion: {{ .Values.aws.region | quote }}
+      authenticationRef:
+        name: {{ .Values.app.name }}-keda-auth

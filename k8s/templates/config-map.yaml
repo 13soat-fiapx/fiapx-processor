@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+
+metadata:
+  name: {{ .Values.app.name }}-configs
+
+data:
+  AWS_REGION: {{ .Values.aws.region | quote }}
+  SQS_QUEUE_URL: {{ .Values.queue.url | required "Parameter queue.url is required." | quote }}
+  S3_BUCKET: "{{ .Values.app.project }}-{{ .Values.app.env }}-{{ .Values.s3.bucket }}"
+  FRAME_PREFIX: {{ .Values.framePrefix | quote }}

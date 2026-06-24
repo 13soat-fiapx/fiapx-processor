@@ -1,0 +1,25 @@
+app:
+  project: fiapx
+  name: processor
+  version: 1.0.0
+  env: dev
+
+image:
+  repository: ""
+  tag: latest
+
+aws:
+  region: us-east-1
+
+queue:
+  event: VideoProcessingRequested
+  name: "video-processing-requested"
+  url: ""
+
+s3:
+  bucket: "videos"
+
+framePrefix: "frames"
+
+secrets:
+  clusterSecretStore: fiapx-aws-secrets

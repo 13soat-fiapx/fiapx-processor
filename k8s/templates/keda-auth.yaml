@@ -1,0 +1,17 @@
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+
+metadata:
+  name: {{ .Values.app.name }}-keda-auth
+
+spec:
+  secretTargetRef:
+    - parameter: awsAccessKeyID
+      name: {{ .Values.app.name }}-aws
+      key: access-key-id
+    - parameter: awsSecretAccessKey
+      name: {{ .Values.app.name }}-aws
+      key: secret-access-key
+    - parameter: awsSessionToken
+      name: {{ .Values.app.name }}-aws
+      key: session-token
