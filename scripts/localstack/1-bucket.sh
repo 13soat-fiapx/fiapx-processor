@@ -1,7 +1,7 @@
 #!/bin/bash
 
 BUCKETS=(
-  'fiapx-dev-videos'
+  'fiapx-dev-artifacts-000000000000'
 )
 
 for BUCKET in "${BUCKETS[@]}"; do

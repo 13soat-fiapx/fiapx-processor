@@ -1,7 +1,7 @@
 export const config = {
   awsRegion: process.env.AWS_REGION ?? "us-east-1",
   awsEndpoint: process.env.AWS_ENDPOINT,
-  s3Bucket: process.env.S3_BUCKET ?? "fiapx-dev-videos",
+  s3BucketPrefix: process.env.S3_BUCKET_PREFIX ?? "fiapx-dev-artifacts",
   framePrefix: process.env.FRAME_PREFIX ?? "frames",
   ffmpegPath: process.env.FFMPEG_PATH ?? "ffmpeg",
 };

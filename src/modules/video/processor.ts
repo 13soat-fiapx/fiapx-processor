@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { config } from "../../config";
+import { resolveBucketName } from "../../shared/utils/bucket-name-resolver";
 import {
   downloadFromAwsS3,
   uploadToAwsS3,
@@ -10,7 +11,7 @@ import {
 import type { VideoProcessingMessage } from "../broker/types";
 
 export async function processVideo(message: VideoProcessingMessage) {
-  const bucket = message.bucket ?? config.s3Bucket;
+  const bucket = message.bucket ?? await resolveBucketName(config.s3BucketPrefix);
   const workdir = join(tmpdir(), `fiapx-video-${message.videoId}-${randomUUID()}`);
   const videoPath = join(workdir, "input-video");
   const framesDir = join(workdir, "frames");

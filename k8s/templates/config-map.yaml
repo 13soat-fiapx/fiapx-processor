@@ -10,5 +10,5 @@ data:
   {{- range $key, $value := .Values.queueNames }}
   SQS_QUEUE_NAMES_{{ $key }}: "{{ $.Values.app.project }}-{{ $.Values.app.env }}-{{ $value }}"
   {{- end }}
-  S3_BUCKET: "{{ .Values.app.project }}-{{ .Values.app.env }}-{{ .Values.bucket.name }}"
+  S3_BUCKET_PREFIX: "{{ .Values.app.project }}-{{ .Values.app.env }}-{{ .Values.bucket.prefix }}"
   FRAME_PREFIX: {{ .Values.bucket.framePrefix | quote }}

@@ -20,7 +20,7 @@ queueNames:
   VIDEO_PROCESSING_COMPLETED: "video-processing-completed"
 
 bucket:
-  name: "videos"
+  prefix: "artifacts"
   framePrefix: "frames"
 
 secrets:
