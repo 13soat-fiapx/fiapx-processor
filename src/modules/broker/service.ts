@@ -2,8 +2,8 @@ import {
   DeleteMessageCommand,
   ReceiveMessageCommand,
 } from "@aws-sdk/client-sqs";
-import { getQueueUrl } from "../../config";
 import { sqsClient } from "../../shared/aws";
+import { resolveQueueUrl } from "../../shared/utils/queue-url-resolver";
 import type { BrokerModel } from "./model";
 import type { QueueMessage, VideoProcessingMessage } from "./types";
 
@@ -31,7 +31,7 @@ export abstract class Broker {
   }
 
   static async receiveVideoMessage(): Promise<QueueMessage | null> {
-    const queueUrl = getQueueUrl();
+    const queueUrl = await resolveQueueUrl("VIDEO_PROCESSING_REQUESTED");
     const response = await sqsClient.send(
       new ReceiveMessageCommand({
         QueueUrl: queueUrl,
@@ -55,9 +55,10 @@ export abstract class Broker {
   }
 
   static async deleteVideoMessage(receiptHandle: string) {
+    const queueUrl = await resolveQueueUrl("VIDEO_PROCESSING_REQUESTED");
     await sqsClient.send(
       new DeleteMessageCommand({
-        QueueUrl: getQueueUrl(),
+        QueueUrl: queueUrl,
         ReceiptHandle: receiptHandle,
       }),
     );

@@ -2,9 +2,10 @@ FROM oven/bun:1.1.17
 
 WORKDIR /app
 
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
-  && rm -rf /var/lib/apt/lists/*
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg ca-certificates
 
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile

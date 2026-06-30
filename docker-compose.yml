@@ -1,9 +1,12 @@
 name: video-processor
 
 services:
-
   localstack:
     image: localstack/localstack:3
+    environment:
+      - SERVICES=sqs,s3,dynamodb
+      - DYNAMODB_SHARE_DB=1
+      - DYNAMODB_IN_MEMORY=1
     ports:
       - "4566:4566"
     volumes:
