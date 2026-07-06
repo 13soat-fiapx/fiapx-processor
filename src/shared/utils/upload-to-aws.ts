@@ -1,4 +1,5 @@
 import {
+  DeleteObjectCommand,
   GetObjectCommand,
   PutObjectCommand,
   type GetObjectCommandOutput,
@@ -36,6 +37,15 @@ export async function uploadToAwsS3(
       Key: key,
       Body: body,
       ContentType: contentType,
+    }),
+  );
+}
+
+export async function deleteFromAwsS3(bucket: string, key: string) {
+  await s3Client.send(
+    new DeleteObjectCommand({
+      Bucket: bucket,
+      Key: key,
     }),
   );
 }

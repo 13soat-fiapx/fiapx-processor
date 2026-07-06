@@ -1,3 +1,4 @@
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { S3Client } from "@aws-sdk/client-s3";
 import { SQSClient } from "@aws-sdk/client-sqs";
 import { STSClient } from "@aws-sdk/client-sts";
@@ -18,3 +19,4 @@ const clientConfig = {
 export const s3Client = new S3Client(clientConfig);
 export const sqsClient = new SQSClient(clientConfig);
 export const stsClient = new STSClient(clientConfig);
+export const dynamoDbClient = new DynamoDBClient(clientConfig);

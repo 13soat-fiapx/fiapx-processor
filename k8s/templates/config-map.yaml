@@ -12,3 +12,4 @@ data:
   {{- end }}
   S3_BUCKET_PREFIX: "{{ .Values.app.project }}-{{ .Values.app.env }}-{{ .Values.bucket.prefix }}"
   FRAME_PREFIX: {{ .Values.bucket.framePrefix | quote }}
+  PROCESSING_JOBS_TABLE_NAME: "videos-db"
