@@ -6,12 +6,14 @@ import { Broker } from "./service"
 export const broker = new Elysia({ prefix: '/video' })
   .post(
     '/process',
-    async ({ body }) => {
+    async ({ body, set }) => {
 
       await Broker.sendFrame(body)
+      set.status = 202
 
       return {
-        message: 'Frame received successfully'
+        message: 'Video processing request published successfully',
+        processingJobId: body.processingJobId,
       }
     }, {
       body: BrokerModel.brokerRequest,

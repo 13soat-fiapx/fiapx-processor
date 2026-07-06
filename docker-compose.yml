@@ -1,6 +1,20 @@
 name: video-processor
 
 services:
+  worker:
+    build:
+      context: .
+    env_file:
+      - .env
+    environment:
+      - AWS_ENDPOINT=http://localstack:4566
+      - PROCESSING_JOBS_TABLE_NAME=fiapx-dev-videos-db
+      - SQS_QUEUE_NAMES_VIDEO_PROCESSING_REQUESTED=fiapx-dev-video-processing-requested
+      - SQS_QUEUE_NAMES_VIDEO_PROCESSING_COMPLETED=fiapx-dev-video-processing-completed
+    depends_on:
+      localstack:
+        condition: service_healthy
+
   localstack:
     image: localstack/localstack:3
     environment:
