@@ -1,7 +1,8 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { zipSync } from "fflate";
 import { config } from "../../config";
 import { resolveBucketName } from "../../shared/utils/bucket-name-resolver";
 import {
@@ -10,12 +11,14 @@ import {
   uploadToAwsS3,
 } from "../../shared/utils/upload-to-aws";
 import type { VideoProcessingMessage } from "../broker/types";
+import type { ProcessingJobResultFile } from "../processing-jobs/types";
 
-export async function processVideo(message: VideoProcessingMessage) {
+export async function processVideo(message: VideoProcessingMessage): Promise<ProcessingJobResultFile> {
   const bucket = message.inputFile.bucket ?? await resolveBucketName(config.s3BucketPrefix);
   const workdir = join(tmpdir(), `fiapx-video-${message.processingJobId}-${randomUUID()}`);
   const videoPath = join(workdir, "input-video");
   const framesDir = join(workdir, "frames");
+  const region = message.inputFile.region ?? config.awsRegion;
 
   await mkdir(framesDir, { recursive: true });
 
@@ -38,6 +41,13 @@ export async function processVideo(message: VideoProcessingMessage) {
       framesDir,
       message.outputPrefix,
     );
+    const resultFile = await uploadFramesZip(
+      bucket,
+      region,
+      message.processingJobId,
+      framesDir,
+      message.outputPrefix,
+    );
 
     console.log(
       {
@@ -54,9 +64,13 @@ export async function processVideo(message: VideoProcessingMessage) {
         processingJobId: message.processingJobId,
         userId: message.userId,
         uploadedFrames,
+        resultFileKey: resultFile.key,
+        resultFileId: resultFile.id,
       },
       "video processed",
     );
+
+    return resultFile;
   } finally {
     await rm(workdir, { recursive: true, force: true });
   }
@@ -117,4 +131,42 @@ async function uploadFrames(
   );
 
   return frameFiles.length;
+}
+
+async function uploadFramesZip(
+  bucket: string,
+  region: string,
+  processingJobId: string,
+  framesDir: string,
+  outputPrefix?: string,
+): Promise<ProcessingJobResultFile> {
+  const files = await readdir(framesDir);
+  const frameFiles = files.filter((file) => file.endsWith(".jpg")).sort();
+
+  if (frameFiles.length === 0) {
+    throw new Error("No frames were extracted from the input video.");
+  }
+
+  const entries: Record<string, Uint8Array> = {};
+  for (const file of frameFiles) {
+    entries[file] = await readFile(join(framesDir, file));
+  }
+
+  const zip = zipSync(entries, { level: 6 });
+  const normalizedPrefix = outputPrefix?.replace(/\/+$/, "");
+  const key = normalizedPrefix
+    ? `${normalizedPrefix}/frames.zip`
+    : `${config.framePrefix}/${processingJobId}/frames.zip`;
+  const checksum = createHash("sha256").update(zip).digest("hex");
+
+  await uploadToAwsS3(bucket, key, zip, "application/zip");
+
+  return {
+    id: randomUUID(),
+    bucket,
+    key,
+    region,
+    sizeBytes: zip.byteLength,
+    checksum,
+  };
 }

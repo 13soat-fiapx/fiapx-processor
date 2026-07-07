@@ -12,7 +12,8 @@
     "@aws-sdk/client-sqs": "^3.600.0",
     "@aws-sdk/client-sts": "^3.1075.0",
     "@elysia/openapi": "^1.4.15",
-    "elysia": "latest"
+    "elysia": "latest",
+    "fflate": "^0.8.3"
   },
   "devDependencies": {
     "bun-types": "latest"
