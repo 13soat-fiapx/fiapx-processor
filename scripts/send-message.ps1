@@ -78,16 +78,16 @@ $jobItem = @{
   status             = @{ S = 'queued' }
   inputFile          = @{
     M = @{
-      s3Object        = @{
+      S3Object        = @{
         M = @{
-          bucket      = @{ S = $Bucket }
-          key         = @{ S = $InputKey }
-          region      = @{ S = 'us-east-1' }
+          Bucket      = @{ S = $Bucket }
+          Key         = @{ S = $InputKey }
+          Region      = @{ S = 'us-east-1' }
         }
       }
-      originalFileName = @{ S = 'original.mp4' }
-      contentType      = @{ S = 'video/mp4' }
-      sizeBytes        = @{ N = '10485760' }
+      OriginalFileName = @{ S = 'original.mp4' }
+      ContentType      = @{ S = 'video/mp4' }
+      SizeBytes        = @{ N = '10485760' }
     }
   }
   outputPrefix       = @{ S = "frames/$ProcessingJobId/" }
@@ -98,10 +98,10 @@ $jobItem = @{
     L = @(
       @{
         M = @{
-          code      = @{ S = 'PROC-0002' }
-          message   = @{ S = 'Upload confirmed and processing job queued.' }
-          severity  = @{ S = 'info' }
-          createdAt = @{ S = $occurredAt }
+          Code      = @{ S = 'PROC-0002' }
+          Message   = @{ S = 'Upload confirmed and processing job queued.' }
+          Severity  = @{ S = 'info' }
+          CreatedAt = @{ S = $occurredAt }
         }
       }
     )

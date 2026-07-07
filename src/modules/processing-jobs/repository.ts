@@ -40,10 +40,10 @@ function buildProcessingMessage(input: Omit<ProcessingMessage, "createdAt">): Pr
 function toMessageAttributeValue(message: ProcessingMessage): AttributeValue {
   return {
     M: {
-      code: { S: message.code },
-      message: { S: message.message },
-      severity: { S: message.severity },
-      createdAt: { S: message.createdAt ?? new Date().toISOString() },
+      Code: { S: message.code },
+      Message: { S: message.message },
+      Severity: { S: message.severity },
+      CreatedAt: { S: message.createdAt ?? new Date().toISOString() },
     },
   };
 }
@@ -69,10 +69,10 @@ function getMessages(
   return value.L.flatMap((entry) => {
     if (!("M" in entry) || !entry.M) return [];
 
-    const code = entry.M.code;
-    const message = entry.M.message;
-    const severity = entry.M.severity;
-    const createdAt = entry.M.createdAt;
+    const code = entry.M.Code ?? entry.M.code;
+    const message = entry.M.Message ?? entry.M.message;
+    const severity = entry.M.Severity ?? entry.M.severity;
+    const createdAt = entry.M.CreatedAt ?? entry.M.createdAt;
 
     if (
       !code || !("S" in code) || !code.S ||
@@ -106,9 +106,9 @@ function getS3Object(
   const value = item[key];
   if (!value || !("M" in value) || !value.M) return undefined;
 
-  const bucket = value.M.bucket;
-  const objectKey = value.M.key;
-  const region = value.M.region;
+  const bucket = value.M.Bucket ?? value.M.bucket;
+  const objectKey = value.M.Key ?? value.M.key;
+  const region = value.M.Region ?? value.M.region;
 
   if (
     !bucket || !("S" in bucket) || !bucket.S ||
@@ -213,9 +213,9 @@ export abstract class ProcessingJobRepository {
       expressionAttributeValues[":resultFileId"] = { S: input.resultFile.id };
       expressionAttributeValues[":resultFile"] = {
         M: {
-          bucket: { S: input.resultFile.bucket },
-          key: { S: input.resultFile.key },
-          region: { S: input.resultFile.region },
+          Bucket: { S: input.resultFile.bucket },
+          Key: { S: input.resultFile.key },
+          Region: { S: input.resultFile.region },
         },
       };
       expressionAttributeValues[":resultSizeBytes"] = {
