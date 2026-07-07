@@ -7,7 +7,6 @@ import {
 import { randomUUID } from "node:crypto";
 import { sqsClient } from "../../shared/aws";
 import { resolveQueueUrl } from "../../shared/utils/queue-url-resolver";
-import { ProcessingJobService } from "../processing-jobs/service";
 import type { BrokerModel } from "./model";
 import type {
   QueueMessage,
@@ -63,11 +62,6 @@ export abstract class Broker {
   static async sendFrame(payload: BrokerModel["brokerRequest"]) {
     const queueUrl = await resolveQueueUrl("VIDEO_PROCESSING_REQUESTED");
     const event = buildVideoProcessingEvent(payload);
-
-    await ProcessingJobService.createPending({
-      processingJobId: payload.processingJobId,
-      userId: payload.userId,
-    });
 
     await sqsClient.send(
       new SendMessageCommand({

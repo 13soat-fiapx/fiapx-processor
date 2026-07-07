@@ -43,19 +43,20 @@ async function main() {
   try {
     await ProcessingJobService.updateStatus({
       processingJobId: message.body.processingJobId,
-      status: "PROCESSING",
+      status: "processing",
     });
 
-    await processVideo(message.body);
+    const resultFile = await processVideo(message.body);
 
     await ProcessingJobService.updateStatus({
       processingJobId: message.body.processingJobId,
-      status: "COMPLETED",
+      status: "succeeded",
+      resultFile,
     });
   } catch (error) {
     await ProcessingJobService.updateStatus({
       processingJobId: message.body.processingJobId,
-      status: "FAILED",
+      status: "failed",
       errorMessage: error instanceof Error ? error.message : String(error),
     });
 
