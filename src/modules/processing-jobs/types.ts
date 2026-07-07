@@ -17,13 +17,26 @@ export type ProcessingJobResultFile = S3ObjectReference & {
   checksum: string;
 };
 
+export type ProcessingMessage = {
+  code: string;
+  message: string;
+  severity: "info" | "warning" | "error";
+  createdAt?: string;
+};
+
 export type ProcessingJob = {
   id: string;
   userId: string;
+  userName: string;
+  userEmail: string;
   status: ProcessingJobStatus;
   resultFileId?: string;
   resultFile?: S3ObjectReference;
+  resultSizeBytes?: number;
+  resultChecksum?: string;
+  messages: ProcessingMessage[];
   errorMessage?: string;
   createdAt?: string;
   updatedAt?: string;
+  completedAt?: string;
 };

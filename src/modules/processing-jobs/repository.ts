@@ -9,8 +9,87 @@ import type {
   ProcessingJob,
   ProcessingJobResultFile,
   ProcessingJobStatus,
+  ProcessingMessage,
   S3ObjectReference,
 } from "./types";
+
+const processingMessages = {
+  started: {
+    code: "PROC-0003",
+    message: "Processing started.",
+    severity: "info",
+  },
+  completed: {
+    code: "PROC-1000",
+    message: "Processing completed successfully.",
+    severity: "info",
+  },
+  failed: {
+    code: "PROC-9000",
+    severity: "error",
+  },
+} as const;
+
+function buildProcessingMessage(input: Omit<ProcessingMessage, "createdAt">): ProcessingMessage {
+  return {
+    ...input,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function toMessageAttributeValue(message: ProcessingMessage): AttributeValue {
+  return {
+    M: {
+      code: { S: message.code },
+      message: { S: message.message },
+      severity: { S: message.severity },
+      createdAt: { S: message.createdAt ?? new Date().toISOString() },
+    },
+  };
+}
+
+function getNumber(
+  item: Record<string, AttributeValue>,
+  key: string,
+): number | undefined {
+  const value = item[key];
+  if (!value || !("N" in value) || value.N === undefined) return undefined;
+
+  const parsed = Number(value.N);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function getMessages(
+  item: Record<string, AttributeValue>,
+  key: string,
+): ProcessingMessage[] {
+  const value = item[key];
+  if (!value || !("L" in value) || !value.L) return [];
+
+  return value.L.flatMap((entry) => {
+    if (!("M" in entry) || !entry.M) return [];
+
+    const code = entry.M.code;
+    const message = entry.M.message;
+    const severity = entry.M.severity;
+    const createdAt = entry.M.createdAt;
+
+    if (
+      !code || !("S" in code) || !code.S ||
+      !message || !("S" in message) || !message.S ||
+      !severity || !("S" in severity) || !severity.S
+    ) {
+      return [];
+    }
+
+    return [{
+      code: code.S,
+      message: message.S,
+      severity: severity.S as ProcessingMessage["severity"],
+      createdAt: createdAt && "S" in createdAt ? createdAt.S : undefined,
+    }];
+  });
+}
 
 function getString(
   item: Record<string, AttributeValue>,
@@ -53,21 +132,29 @@ function toProcessingJob(
 
   const id = getString(item, "id");
   const userId = getString(item, "userId");
+  const userName = getString(item, "userName");
+  const userEmail = getString(item, "userEmail");
   const status = getString(item, "status") as ProcessingJobStatus | undefined;
 
-  if (!id || !userId || !status) {
-    throw new Error("Processing job item is missing id, userId or status");
+  if (!id || !userId || !userName || !userEmail || !status) {
+    throw new Error("Processing job item is missing id, userId, userName, userEmail or status");
   }
 
   return {
     id,
     userId,
+    userName,
+    userEmail,
     status,
     resultFileId: getString(item, "resultFileId"),
     resultFile: getS3Object(item, "resultFile"),
+    resultSizeBytes: getNumber(item, "resultSizeBytes"),
+    resultChecksum: getString(item, "resultChecksum"),
+    messages: getMessages(item, "messages"),
     errorMessage: getString(item, "errorMessage"),
     createdAt: getString(item, "createdAt"),
     updatedAt: getString(item, "updatedAt"),
+    completedAt: getString(item, "completedAt"),
   };
 }
 
@@ -90,7 +177,7 @@ export abstract class ProcessingJobRepository {
     status: ProcessingJobStatus;
     resultFile?: ProcessingJobResultFile;
     errorMessage?: string;
-  }): Promise<void> {
+  }): Promise<ProcessingJob> {
     const now = new Date().toISOString();
     const expressionAttributeNames: Record<string, string> = {
       "#status": "status",
@@ -101,11 +188,13 @@ export abstract class ProcessingJobRepository {
       ":updatedAt": { S: now },
     };
     const updateExpressions = ["#status = :status", "#updatedAt = :updatedAt"];
+    const messages: ProcessingMessage[] = [];
 
     if (input.status === "processing") {
       expressionAttributeNames["#progressPercentage"] = "progressPercentage";
       expressionAttributeValues[":progressPercentage"] = { N: "0" };
       updateExpressions.push("#progressPercentage = :progressPercentage");
+      messages.push(buildProcessingMessage(processingMessages.started));
     }
 
     if (input.status === "succeeded") {
@@ -143,30 +232,50 @@ export abstract class ProcessingJobRepository {
         "#resultSizeBytes = :resultSizeBytes",
         "#resultChecksum = :resultChecksum",
       );
+      messages.push(buildProcessingMessage(processingMessages.completed));
     }
 
     if (input.status === "failed") {
       expressionAttributeNames["#completedAt"] = "completedAt";
       expressionAttributeValues[":completedAt"] = { S: now };
       updateExpressions.push("#completedAt = :completedAt");
+      messages.push(buildProcessingMessage({
+        ...processingMessages.failed,
+        message: input.errorMessage ?? "Video processing failed.",
+      }));
     }
 
-    if (input.errorMessage) {
-      expressionAttributeNames["#errorMessage"] = "errorMessage";
-      expressionAttributeValues[":errorMessage"] = { S: input.errorMessage };
-      updateExpressions.push("#errorMessage = :errorMessage");
+    if (messages.length > 0) {
+      expressionAttributeNames["#messages"] = "messages";
+      expressionAttributeValues[":emptyMessages"] = { L: [] };
+      expressionAttributeValues[":messages"] = {
+        L: messages.map(toMessageAttributeValue),
+      };
+      updateExpressions.push(
+        "#messages = list_append(if_not_exists(#messages, :emptyMessages), :messages)",
+      );
     }
 
-    await dynamoDbClient.send(
+    const response = await dynamoDbClient.send(
       new UpdateItemCommand({
         TableName: config.processingJobsTableName,
         Key: {
           id: { S: input.processingJobId },
         },
+        ConditionExpression: "attribute_exists(id)",
         UpdateExpression: `SET ${updateExpressions.join(", ")}`,
         ExpressionAttributeNames: expressionAttributeNames,
         ExpressionAttributeValues: expressionAttributeValues,
+        ReturnValues: "ALL_NEW",
       }),
     );
+
+    const updatedJob = toProcessingJob(response.Attributes);
+
+    if (!updatedJob) {
+      throw new Error(`Processing job '${input.processingJobId}' was not returned after status update.`);
+    }
+
+    return updatedJob;
   }
 }
