@@ -7,6 +7,8 @@ export const ProcessingJobModel = {
   partialStatus: t.Object({
     processingJobId: t.String(),
     userId: t.String(),
+    userName: t.String(),
+    userEmail: t.String(),
     status: t.Union([
       t.Literal("upload_pending"),
       t.Literal("queued"),
@@ -20,7 +22,12 @@ export const ProcessingJobModel = {
       key: t.String(),
       region: t.String(),
     })),
-    errorMessage: t.Optional(t.String()),
+    messages: t.Array(t.Object({
+      code: t.String(),
+      message: t.String(),
+      severity: t.String(),
+      createdAt: t.Optional(t.String()),
+    })),
     createdAt: t.Optional(t.String()),
     updatedAt: t.Optional(t.String()),
   }),
