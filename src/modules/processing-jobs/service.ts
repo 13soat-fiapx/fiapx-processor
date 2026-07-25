@@ -1,14 +1,7 @@
 import { ProcessingJobRepository } from "./repository";
-import type { ProcessingJobStatus } from "./types";
+import type { ProcessingJobResultFile, ProcessingJobStatus } from "./types";
 
 export abstract class ProcessingJobService {
-  static async createPending(input: {
-    processingJobId: string;
-    userId: string;
-  }) {
-    await ProcessingJobRepository.createPending(input);
-  }
-
   static async getStatus(processingJobId: string) {
     const job = await ProcessingJobRepository.findById(processingJobId);
 
@@ -17,9 +10,12 @@ export abstract class ProcessingJobService {
     return {
       processingJobId: job.id,
       userId: job.userId,
+      userName: job.userName,
+      userEmail: job.userEmail,
       status: job.status,
-      outputFileKey: job.outputFileKey,
-      errorMessage: job.errorMessage,
+      resultFileId: job.resultFileId,
+      resultFile: job.resultFile,
+      messages: job.messages,
       createdAt: job.createdAt,
       updatedAt: job.updatedAt,
     };
@@ -28,9 +24,9 @@ export abstract class ProcessingJobService {
   static async updateStatus(input: {
     processingJobId: string;
     status: ProcessingJobStatus;
-    outputFileKey?: string;
+    resultFile?: ProcessingJobResultFile;
     errorMessage?: string;
   }) {
-    await ProcessingJobRepository.updateStatus(input);
+    return await ProcessingJobRepository.updateStatus(input);
   }
 }

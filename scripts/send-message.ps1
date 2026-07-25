@@ -4,7 +4,10 @@ param (
 )
 
 $UserId    = 'auth0|abc123'
+$UserName  = 'Local User'
+$UserEmail = 'local.user@fiapx.io'
 $QueueName = 'fiapx-dev-video-processing-requested'
+$TableName = 'fiapx-dev-videos-db'
 $Container = 'video-processor-localstack-1'
 $Bucket    = 'fiapx-dev-artifacts-000000000000'
 $InputKey  = "videos/$ProcessingJobId/original.mp4"
@@ -67,6 +70,74 @@ if ($VideoPath)
   docker exec $Container rm -f "$ContainerVideoPath" > $null
 }
 
+$jobItem = @{
+  id                 = @{ S = $ProcessingJobId }
+  userId             = @{ S = $UserId }
+  userName           = @{ S = $UserName }
+  userEmail          = @{ S = $UserEmail }
+  status             = @{ S = 'queued' }
+  inputFile          = @{
+    M = @{
+      S3Object        = @{
+        M = @{
+          Bucket      = @{ S = $Bucket }
+          Key         = @{ S = $InputKey }
+          Region      = @{ S = 'us-east-1' }
+        }
+      }
+      OriginalFileName = @{ S = 'original.mp4' }
+      ContentType      = @{ S = 'video/mp4' }
+      SizeBytes        = @{ N = '10485760' }
+    }
+  }
+  outputPrefix       = @{ S = "frames/$ProcessingJobId/" }
+  progressPercentage = @{ N = '0' }
+  createdAt          = @{ S = $occurredAt }
+  updatedAt          = @{ S = $occurredAt }
+  messages           = @{
+    L = @(
+      @{
+        M = @{
+          Code      = @{ S = 'PROC-0002' }
+          Message   = @{ S = 'Upload confirmed and processing job queued.' }
+          Severity  = @{ S = 'info' }
+          CreatedAt = @{ S = $occurredAt }
+        }
+      }
+    )
+  }
+} | ConvertTo-Json -Depth 20 -Compress
+
+Write-Host -ForegroundColor Yellow "Seeding DynamoDB job '$ProcessingJobId'..."
+
+$JobPath = [System.IO.Path]::GetTempFileName()
+$ContainerJobPath = "/tmp/$ProcessingJobId-job.json"
+
+$Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($JobPath, $jobItem, $Utf8NoBom)
+
+docker cp $JobPath "${Container}:$ContainerJobPath"
+
+if ($LASTEXITCODE -ne 0)
+{
+  Remove-Item -LiteralPath $JobPath -Force
+  throw "Failed to copy DynamoDB job item into LocalStack container"
+}
+
+docker exec $Container `
+  awslocal dynamodb put-item `
+    --table-name "$TableName" `
+    --item "file://$ContainerJobPath"
+
+$PutExitCode = $LASTEXITCODE
+docker exec $Container rm -f "$ContainerJobPath" > $null
+Remove-Item -LiteralPath $JobPath -Force
+
+if ($PutExitCode -ne 0)
+{
+  throw "Failed to seed job '$ProcessingJobId' in table '$TableName'"
+}
+
 $body = @{
   headers = $messageHeaders
   payload = $messagePayload
@@ -77,7 +148,6 @@ Write-Host -ForegroundColor Yellow "Publishing VideoProcessingRequested ($Proces
 $MessagePath = [System.IO.Path]::GetTempFileName()
 $ContainerMessagePath = "/tmp/$ProcessingJobId-message.json"
 
-$Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText($MessagePath, $body, $Utf8NoBom)
 
 docker cp $MessagePath "${Container}:$ContainerMessagePath"

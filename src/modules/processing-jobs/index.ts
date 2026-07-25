@@ -14,13 +14,13 @@ export const processingJobs = new Elysia({ prefix: "/v1/processing-jobs" }).get(
       };
     }
 
-    if (job.status === "COMPLETED" && job.outputFileKey) {
+    if (job.status === "succeeded" && job.resultFileId) {
       set.status = 303;
-      set.headers.Location = `/v1/files/${encodeURIComponent(job.outputFileKey)}`;
+      set.headers.Location = `/v1/files/${encodeURIComponent(job.resultFileId)}`;
       return "";
     }
 
-    if (job.status === "PENDING" || job.status === "PROCESSING") {
+    if (job.status === "upload_pending" || job.status === "queued" || job.status === "processing") {
       set.headers["Retry-After"] = "20";
     }
 

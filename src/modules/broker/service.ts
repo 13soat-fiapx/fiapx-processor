@@ -4,41 +4,52 @@ import {
   ReceiveMessageCommand,
   SendMessageCommand,
 } from "@aws-sdk/client-sqs";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { sqsClient } from "../../shared/aws";
 import { resolveQueueUrl } from "../../shared/utils/queue-url-resolver";
-import { ProcessingJobService } from "../processing-jobs/service";
 import type { BrokerModel } from "./model";
 import type {
+  EventHeaders,
   QueueMessage,
+  VideoProcessingCompletedEvent,
+  VideoProcessingCompletedMessage,
   VideoProcessingEvent,
   VideoProcessingMessage,
 } from "./types";
 
-function parseVideoProcessingMessage(body: string | undefined): VideoProcessingMessage {
+function parseVideoProcessingEvent(body: string | undefined): {
+  payload: VideoProcessingMessage;
+  headers?: EventHeaders;
+} {
   if (!body) {
     throw new Error("SQS message body is empty");
   }
 
-  const message = JSON.parse(body.replace(/^\uFEFF/, "")) as Partial<VideoProcessingEvent>
+  const message = JSON.parse(body.replace(/^\uFEFF/, "")) as Partial<VideoProcessingEvent>;
   const payload = message.payload;
 
   if (!payload) {
     throw new Error("SQS message body must include payload");
   }
 
-
   if (!payload.processingJobId || !payload.userId || !payload.inputFile?.key) {
     throw new Error("SQS message body must include processingJobId, userId and inputFile.key");
   }
 
   return {
-    processingJobId: payload.processingJobId,
-    userId: payload.userId,
-    inputFile: payload.inputFile,
-    outputPrefix: payload.outputPrefix,
-    requestedAt: payload.requestedAt,
+    headers: message.headers,
+    payload: {
+      processingJobId: payload.processingJobId,
+      userId: payload.userId,
+      inputFile: payload.inputFile,
+      outputPrefix: payload.outputPrefix,
+      requestedAt: payload.requestedAt,
+    },
   };
+}
+
+function createTraceparent() {
+  return `00-${randomBytes(16).toString("hex")}-${randomBytes(8).toString("hex")}-01`;
 }
 
 function buildVideoProcessingEvent(payload: VideoProcessingMessage): VideoProcessingEvent {
@@ -47,8 +58,9 @@ function buildVideoProcessingEvent(payload: VideoProcessingMessage): VideoProces
   return {
     headers: {
       eventId: randomUUID(),
-      eventType: "VideoProcessingRequested",
+      eventType: "video.processing.requested",
       eventVersion: "1.0",
+      traceparent: createTraceparent(),
       occurredAt,
       source: "fiapx-video-processor",
     },
@@ -59,15 +71,31 @@ function buildVideoProcessingEvent(payload: VideoProcessingMessage): VideoProces
   };
 }
 
+function buildVideoProcessingCompletedEvent(
+  payload: VideoProcessingCompletedMessage,
+  sourceHeaders?: EventHeaders,
+): VideoProcessingCompletedEvent {
+  const occurredAt = new Date().toISOString();
+
+  return {
+    headers: {
+      eventId: randomUUID(),
+      eventType: "video.processing.completed",
+      eventVersion: "1.0",
+      traceparent: sourceHeaders?.traceparent ?? createTraceparent(),
+      tracestate: sourceHeaders?.tracestate,
+      baggage: sourceHeaders?.baggage,
+      occurredAt,
+      source: "fiapx-processor",
+    },
+    payload,
+  };
+}
+
 export abstract class Broker {
   static async sendFrame(payload: BrokerModel["brokerRequest"]) {
     const queueUrl = await resolveQueueUrl("VIDEO_PROCESSING_REQUESTED");
     const event = buildVideoProcessingEvent(payload);
-
-    await ProcessingJobService.createPending({
-      processingJobId: payload.processingJobId,
-      userId: payload.userId,
-    });
 
     await sqsClient.send(
       new SendMessageCommand({
@@ -82,6 +110,30 @@ export abstract class Broker {
         userId: payload.userId,
       },
       "video processing request published",
+    );
+  }
+
+  static async sendProcessingCompleted(
+    payload: VideoProcessingCompletedMessage,
+    sourceHeaders?: EventHeaders,
+  ) {
+    const queueUrl = await resolveQueueUrl("VIDEO_PROCESSING_COMPLETED");
+    const event = buildVideoProcessingCompletedEvent(payload, sourceHeaders);
+
+    await sqsClient.send(
+      new SendMessageCommand({
+        QueueUrl: queueUrl,
+        MessageBody: JSON.stringify(event),
+      }),
+    );
+
+    console.log(
+      {
+        processingJobId: payload.processingJobId,
+        userId: payload.user.id,
+        status: payload.status,
+      },
+      "video processing completion published",
     );
   }
 
@@ -102,8 +154,11 @@ export abstract class Broker {
       return null;
     }
 
+    const event = parseVideoProcessingEvent(message.Body);
+
     return {
-      body: parseVideoProcessingMessage(message.Body),
+      body: event.payload,
+      headers: event.headers,
       receiptHandle: message.ReceiptHandle,
       messageId: message.MessageId,
     };

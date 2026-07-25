@@ -1,5 +1,7 @@
 import { Broker } from "./modules/broker/service";
+import type { VideoProcessingCompletedMessage } from "./modules/broker/types";
 import { ProcessingJobService } from "./modules/processing-jobs/service";
+import type { ProcessingJob, ProcessingJobResultFile } from "./modules/processing-jobs/types";
 import { processVideo } from "./modules/video/processor";
 
 const VISIBILITY_TIMEOUT_SECONDS = 300;
@@ -16,6 +18,39 @@ function startVisibilityHeartbeat(receiptHandle: string, messageId?: string) {
   }, VISIBILITY_HEARTBEAT_MS);
 
   return () => clearInterval(interval);
+}
+
+function buildCompletedMessage(
+  job: ProcessingJob,
+  status: "succeeded" | "failed",
+  resultFile?: ProcessingJobResultFile,
+): VideoProcessingCompletedMessage {
+  return {
+    processingJobId: job.id,
+    user: {
+      id: job.userId,
+      name: job.userName,
+      email: job.userEmail,
+    },
+    status,
+    messages: job.messages.map(({ code, message, severity }) => ({
+      code,
+      message,
+      severity,
+    })),
+    result: resultFile
+      ? {
+          zipFile: {
+            bucket: resultFile.bucket,
+            key: resultFile.key,
+            region: resultFile.region,
+          },
+          sizeBytes: resultFile.sizeBytes,
+          checksum: resultFile.checksum,
+        }
+      : undefined,
+    completedAt: job.completedAt ?? new Date().toISOString(),
+  };
 }
 
 async function main() {
@@ -40,26 +75,41 @@ async function main() {
     message.messageId,
   );
 
+  let completedJob: ProcessingJob | undefined;
+
   try {
     await ProcessingJobService.updateStatus({
       processingJobId: message.body.processingJobId,
-      status: "PROCESSING",
+      status: "processing",
     });
 
-    await processVideo(message.body);
+    const resultFile = await processVideo(message.body);
 
-    await ProcessingJobService.updateStatus({
+    completedJob = await ProcessingJobService.updateStatus({
       processingJobId: message.body.processingJobId,
-      status: "COMPLETED",
+      status: "succeeded",
+      resultFile,
     });
+
+    await Broker.sendProcessingCompleted(
+      buildCompletedMessage(completedJob, "succeeded", resultFile),
+      message.headers,
+    );
   } catch (error) {
-    await ProcessingJobService.updateStatus({
+    if (completedJob) {
+      throw error;
+    }
+
+    const failedJob = await ProcessingJobService.updateStatus({
       processingJobId: message.body.processingJobId,
-      status: "FAILED",
+      status: "failed",
       errorMessage: error instanceof Error ? error.message : String(error),
     });
 
-    throw error;
+    await Broker.sendProcessingCompleted(
+      buildCompletedMessage(failedJob, "failed"),
+      message.headers,
+    );
   } finally {
     stopVisibilityHeartbeat();
   }
