@@ -7,10 +7,35 @@ import { processVideo } from "./modules/video/processor";
 const VISIBILITY_TIMEOUT_SECONDS = 300;
 const VISIBILITY_HEARTBEAT_MS = 20_000;
 
-function startVisibilityHeartbeat(receiptHandle: string, messageId?: string) {
+type WorkerBroker = Pick<
+  typeof Broker,
+  | "receiveVideoMessage"
+  | "extendVideoMessageVisibility"
+  | "sendProcessingCompleted"
+  | "deleteVideoMessage"
+>;
+type WorkerProcessingJobService = Pick<typeof ProcessingJobService, "updateStatus">;
+
+export type WorkerDependencies = {
+  broker: WorkerBroker;
+  processingJobService: WorkerProcessingJobService;
+  processVideo: typeof processVideo;
+};
+
+const defaultDependencies: WorkerDependencies = {
+  broker: Broker,
+  processingJobService: ProcessingJobService,
+  processVideo,
+};
+
+export function startVisibilityHeartbeat(
+  receiptHandle: string,
+  messageId?: string,
+  broker: WorkerBroker = Broker,
+) {
   const interval = setInterval(async () => {
     try {
-      await Broker.extendVideoMessageVisibility(receiptHandle, VISIBILITY_TIMEOUT_SECONDS);
+      await broker.extendVideoMessageVisibility(receiptHandle, VISIBILITY_TIMEOUT_SECONDS);
       console.log({ messageId }, "SQS message visibility extended");
     } catch (error) {
       console.error({ error, messageId }, "failed to extend SQS message visibility");
@@ -20,7 +45,7 @@ function startVisibilityHeartbeat(receiptHandle: string, messageId?: string) {
   return () => clearInterval(interval);
 }
 
-function buildCompletedMessage(
+export function buildCompletedMessage(
   job: ProcessingJob,
   status: "succeeded" | "failed",
   resultFile?: ProcessingJobResultFile,
@@ -53,8 +78,9 @@ function buildCompletedMessage(
   };
 }
 
-async function main() {
-  const message = await Broker.receiveVideoMessage();
+export async function runWorker(dependencies: WorkerDependencies = defaultDependencies) {
+  const { broker, processingJobService, processVideo } = dependencies;
+  const message = await broker.receiveVideoMessage();
 
   if (!message) {
     console.log("No message available. Worker finished without processing.");
@@ -73,25 +99,26 @@ async function main() {
   const stopVisibilityHeartbeat = startVisibilityHeartbeat(
     message.receiptHandle,
     message.messageId,
+    broker,
   );
 
   let completedJob: ProcessingJob | undefined;
 
   try {
-    await ProcessingJobService.updateStatus({
+    await processingJobService.updateStatus({
       processingJobId: message.body.processingJobId,
       status: "processing",
     });
 
     const resultFile = await processVideo(message.body);
 
-    completedJob = await ProcessingJobService.updateStatus({
+    completedJob = await processingJobService.updateStatus({
       processingJobId: message.body.processingJobId,
       status: "succeeded",
       resultFile,
     });
 
-    await Broker.sendProcessingCompleted(
+    await broker.sendProcessingCompleted(
       buildCompletedMessage(completedJob, "succeeded", resultFile),
       message.headers,
     );
@@ -100,13 +127,13 @@ async function main() {
       throw error;
     }
 
-    const failedJob = await ProcessingJobService.updateStatus({
+    const failedJob = await processingJobService.updateStatus({
       processingJobId: message.body.processingJobId,
       status: "failed",
       errorMessage: error instanceof Error ? error.message : String(error),
     });
 
-    await Broker.sendProcessingCompleted(
+    await broker.sendProcessingCompleted(
       buildCompletedMessage(failedJob, "failed"),
       message.headers,
     );
@@ -114,7 +141,7 @@ async function main() {
     stopVisibilityHeartbeat();
   }
 
-  await Broker.deleteVideoMessage(message.receiptHandle);
+  await broker.deleteVideoMessage(message.receiptHandle);
 
   console.log(
     {
@@ -126,7 +153,9 @@ async function main() {
   );
 }
 
-main().catch((error) => {
-  console.error(error, "worker failed");
-  process.exit(1);
-});
+if (import.meta.main) {
+  runWorker().catch((error) => {
+    console.error(error, "worker failed");
+    process.exit(1);
+  });
+}

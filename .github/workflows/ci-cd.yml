@@ -18,6 +18,14 @@ permissions:
   actions: read
 
 jobs:
+  tests:
+    name: Run tests
+    uses: 13soat-fiapx/fiapx-infra/.github/workflows/bun-tests.yml@main
+    with:
+      enable_sonar: ${{ (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'workflow_dispatch' && github.ref_name == 'main') }}
+      sonar_project_key: "fiapx-${{ vars.SERVICE_NAME }}"
+    secrets: inherit
+  
   resolve-environment:
     name: Resolve environment name
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
