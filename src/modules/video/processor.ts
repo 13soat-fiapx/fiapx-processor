@@ -134,6 +134,14 @@ function spawnFfmpeg(videoPath: string, outputPattern: string) {
   }
 }
 
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === "/") {
+    end -= 1;
+  }
+  return value.slice(0, end);
+}
+
 async function uploadFrames(
   bucket: string,
   processingJobId: string,
@@ -142,7 +150,7 @@ async function uploadFrames(
 ) {
   const files = await readdir(framesDir);
   const frameFiles = files.filter((file) => file.endsWith(".jpg")).sort();
-  const normalizedPrefix = outputPrefix?.replace(/\/+$/, "");
+  const normalizedPrefix = outputPrefix ? stripTrailingSlashes(outputPrefix) : outputPrefix;
 
   await Promise.all(
     frameFiles.map(async (file) => {
@@ -178,7 +186,7 @@ async function uploadFramesZip(
   }
 
   const zip = zipSync(entries, { level: 6 });
-  const normalizedPrefix = outputPrefix?.replace(/\/+$/, "");
+  const normalizedPrefix = outputPrefix ? stripTrailingSlashes(outputPrefix) : outputPrefix;
   const key = normalizedPrefix
     ? `${normalizedPrefix}/frames.zip`
     : `${config.framePrefix}/${processingJobId}/frames.zip`;
