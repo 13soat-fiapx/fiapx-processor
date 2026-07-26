@@ -1,9 +1,13 @@
+import { trace } from "@opentelemetry/api";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { zipSync } from "fflate";
 import { config } from "../../config";
+import { AppMetrics } from "../../shared/observability/app-metrics";
+import { logger } from "../../shared/observability/logger";
+import { traceStep } from "../../shared/observability/trace-step";
 import { resolveBucketName } from "../../shared/utils/bucket-name-resolver";
 import {
   deleteFromAwsS3,
@@ -22,34 +26,55 @@ export async function processVideo(message: VideoProcessingMessage): Promise<Pro
 
   await mkdir(framesDir, { recursive: true });
 
+  const spanAttributes = { "video.id": message.processingJobId };
+
   try {
-    console.log(
-      {
-        bucket,
-        key: message.inputFile.key,
-        processingJobId: message.processingJobId,
+    await traceStep("video.download", spanAttributes, async () => {
+      logger.info(
+        {
+          bucket,
+          key: message.inputFile.key,
+          processingJobId: message.processingJobId,
+        },
+        "start downloading input video from S3",
+      );
+      const video = await downloadFromAwsS3(bucket, message.inputFile.key);
+      await writeFile(videoPath, video);
+    });
+
+    await traceStep("video.extract_frames", spanAttributes, () =>
+      extractFrames(videoPath, framesDir),
+    );
+
+    const { uploadedFrames, resultFile } = await traceStep(
+      "video.zip_upload",
+      spanAttributes,
+      async () => {
+        const uploaded = await uploadFrames(
+          bucket,
+          message.processingJobId,
+          framesDir,
+          message.outputPrefix,
+        );
+
+        trace.getActiveSpan()?.setAttribute("video.frames.count", uploaded);
+
+        return {
+          uploadedFrames: uploaded,
+          resultFile: await uploadFramesZip(
+            bucket,
+            region,
+            message.processingJobId,
+            framesDir,
+            message.outputPrefix,
+          ),
+        };
       },
-      "start downloading input video from S3",
-    );
-    const video = await downloadFromAwsS3(bucket, message.inputFile.key);
-    await writeFile(videoPath, video);
-
-    await extractFrames(videoPath, framesDir);
-    const uploadedFrames = await uploadFrames(
-      bucket,
-      message.processingJobId,
-      framesDir,
-      message.outputPrefix,
-    );
-    const resultFile = await uploadFramesZip(
-      bucket,
-      region,
-      message.processingJobId,
-      framesDir,
-      message.outputPrefix,
     );
 
-    console.log(
+    AppMetrics.recordFramesExtracted(uploadedFrames);
+
+    logger.info(
       {
         bucket,
         key: message.inputFile.key,
@@ -59,7 +84,7 @@ export async function processVideo(message: VideoProcessingMessage): Promise<Pro
     );
     await deleteFromAwsS3(bucket, message.inputFile.key);
 
-    console.log(
+    logger.info(
       {
         processingJobId: message.processingJobId,
         userId: message.userId,

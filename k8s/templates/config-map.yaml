@@ -13,3 +13,8 @@ data:
   S3_BUCKET_PREFIX: "{{ .Values.app.project }}-{{ .Values.app.env }}-{{ .Values.bucket.prefix }}"
   FRAME_PREFIX: {{ .Values.bucket.framePrefix | quote }}
   PROCESSING_JOBS_TABLE_NAME: "{{ .Values.app.project }}-{{ .Values.app.env }}-videos-db"
+  {{- $envMap := dict "dev" "development" "stg" "staging" "prod" "production" }}
+  APP_ENV: {{ index $envMap .Values.app.env | default "development" | quote }}
+  APP_NAME: {{ .Values.app.name | quote }}
+  APP_VERSION: {{ .Values.app.version | quote }}
+  DD_OTLP_ENDPOINT: {{ .Values.datadog.otlpEndpoint | quote }}

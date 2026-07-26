@@ -33,8 +33,18 @@ spec:
                   secretKeyRef:
                     name: {{ .Values.app.name }}-aws
                     key: session-token
+              # optional: the mirror exists from install but has no key until Reflector syncs
+              # it. Without optional the pod would hang in CreateContainerConfigError.
+              - name: DD_API_KEY
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ .Values.app.name }}-datadog
+                    key: api-key
+                    optional: true
 
         restartPolicy: Never
+        # Room for the telemetry flush before the Job is killed.
+        terminationGracePeriodSeconds: {{ .Values.job.terminationGracePeriodSeconds }}
 
   triggers:
     - type: aws-sqs-queue

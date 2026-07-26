@@ -1,8 +1,14 @@
+import { SpanStatusCode } from "@opentelemetry/api";
+import { getQueueNameForTelemetry } from "./config";
 import { Broker } from "./modules/broker/service";
 import type { VideoProcessingCompletedMessage } from "./modules/broker/types";
 import { ProcessingJobService } from "./modules/processing-jobs/service";
 import type { ProcessingJob, ProcessingJobResultFile } from "./modules/processing-jobs/types";
 import { processVideo } from "./modules/video/processor";
+import { initObservability, shutdownObservability } from "./shared/observability";
+import { AppMetrics, type ProcessingStatus } from "./shared/observability/app-metrics";
+import { logger } from "./shared/observability/logger";
+import { startConsumerSpan, withSpan } from "./shared/observability/message-tracing";
 
 const VISIBILITY_TIMEOUT_SECONDS = 300;
 const VISIBILITY_HEARTBEAT_MS = 20_000;
@@ -36,9 +42,9 @@ export function startVisibilityHeartbeat(
   const interval = setInterval(async () => {
     try {
       await broker.extendVideoMessageVisibility(receiptHandle, VISIBILITY_TIMEOUT_SECONDS);
-      console.log({ messageId }, "SQS message visibility extended");
+      logger.info({ messageId }, "SQS message visibility extended");
     } catch (error) {
-      console.error({ error, messageId }, "failed to extend SQS message visibility");
+      logger.error({ error, messageId }, "failed to extend SQS message visibility");
     }
   }, VISIBILITY_HEARTBEAT_MS);
 
@@ -83,79 +89,121 @@ export async function runWorker(dependencies: WorkerDependencies = defaultDepend
   const message = await broker.receiveVideoMessage();
 
   if (!message) {
-    console.log("No message available. Worker finished without processing.");
+    logger.info({}, "No message available. Worker finished without processing.");
     return;
   }
 
-  console.log(
-    {
-      messageId: message.messageId,
-      processingJobId: message.body.processingJobId,
-      userId: message.body.userId,
-    },
-    "processing SQS message",
+  // Continues the trace started by the API; a missing or invalid header yields a root span.
+  const span = startConsumerSpan(
+    getQueueNameForTelemetry("VIDEO_PROCESSING_REQUESTED"),
+    message.headers?.traceparent,
   );
+  span.setAttribute("video.id", message.body.processingJobId);
 
-  const stopVisibilityHeartbeat = startVisibilityHeartbeat(
-    message.receiptHandle,
-    message.messageId,
-    broker,
-  );
-
-  let completedJob: ProcessingJob | undefined;
+  const startedAt = Date.now();
+  let status: ProcessingStatus = "succeeded";
 
   try {
-    await processingJobService.updateStatus({
-      processingJobId: message.body.processingJobId,
-      status: "processing",
+    await withSpan(span, async () => {
+      logger.info(
+        {
+          messageId: message.messageId,
+          processingJobId: message.body.processingJobId,
+          userId: message.body.userId,
+        },
+        "processing SQS message",
+      );
+
+      const stopVisibilityHeartbeat = startVisibilityHeartbeat(
+        message.receiptHandle,
+        message.messageId,
+        broker,
+      );
+
+      let completedJob: ProcessingJob | undefined;
+
+      try {
+        await processingJobService.updateStatus({
+          processingJobId: message.body.processingJobId,
+          status: "processing",
+        });
+
+        const resultFile = await processVideo(message.body);
+
+        completedJob = await processingJobService.updateStatus({
+          processingJobId: message.body.processingJobId,
+          status: "succeeded",
+          resultFile,
+        });
+
+        await broker.sendProcessingCompleted(
+          buildCompletedMessage(completedJob, "succeeded", resultFile),
+          message.headers,
+        );
+      } catch (error) {
+        status = "failed";
+        span.recordException(error as Error);
+        span.setStatus({
+          code: SpanStatusCode.ERROR,
+          message: error instanceof Error ? error.message : String(error),
+        });
+
+        if (completedJob) {
+          throw error;
+        }
+
+        const failedJob = await processingJobService.updateStatus({
+          processingJobId: message.body.processingJobId,
+          status: "failed",
+          errorMessage: error instanceof Error ? error.message : String(error),
+        });
+
+        await broker.sendProcessingCompleted(
+          buildCompletedMessage(failedJob, "failed"),
+          message.headers,
+        );
+      } finally {
+        stopVisibilityHeartbeat();
+      }
+
+      await broker.deleteVideoMessage(message.receiptHandle);
+
+      logger.info(
+        {
+          messageId: message.messageId,
+          processingJobId: message.body.processingJobId,
+          userId: message.body.userId,
+        },
+        "SQS message processed and deleted",
+      );
     });
-
-    const resultFile = await processVideo(message.body);
-
-    completedJob = await processingJobService.updateStatus({
-      processingJobId: message.body.processingJobId,
-      status: "succeeded",
-      resultFile,
-    });
-
-    await broker.sendProcessingCompleted(
-      buildCompletedMessage(completedJob, "succeeded", resultFile),
-      message.headers,
-    );
-  } catch (error) {
-    if (completedJob) {
-      throw error;
-    }
-
-    const failedJob = await processingJobService.updateStatus({
-      processingJobId: message.body.processingJobId,
-      status: "failed",
-      errorMessage: error instanceof Error ? error.message : String(error),
-    });
-
-    await broker.sendProcessingCompleted(
-      buildCompletedMessage(failedJob, "failed"),
-      message.headers,
-    );
   } finally {
-    stopVisibilityHeartbeat();
+    AppMetrics.recordProcessed(status);
+    AppMetrics.recordProcessingDuration((Date.now() - startedAt) / 1000, status);
+    span.end();
   }
-
-  await broker.deleteVideoMessage(message.receiptHandle);
-
-  console.log(
-    {
-      messageId: message.messageId,
-      processingJobId: message.body.processingJobId,
-      userId: message.body.userId,
-    },
-    "SQS message processed and deleted",
-  );
 }
 
 if (import.meta.main) {
-  runWorker().catch((error) => {
-    console.error(error, "worker failed");
-    process.exit(1);
+  initObservability();
+
+  // The Job may be cut short before the work finishes; flush what has been recorded so far.
+  process.on("SIGTERM", () => {
+    void shutdownObservability().finally(() => process.exit(143));
   });
+
+  let exitCode = 0;
+
+  try {
+    await runWorker();
+  } catch (error) {
+    logger.error({ error }, "worker failed");
+    exitCode = 1;
+  } finally {
+    // Mandatory in the ScaledJob: the batch processors export on a timer, so exiting without
+    // this discards the whole job's telemetry.
+    await shutdownObservability();
+  }
+
+  process.exit(exitCode);
 }
