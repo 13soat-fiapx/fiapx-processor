@@ -10,7 +10,7 @@ import { AppMetrics, type ProcessingStatus } from "./shared/observability/app-me
 import { logger } from "./shared/observability/logger";
 import { startConsumerSpan, withSpan } from "./shared/observability/message-tracing";
 
-const VISIBILITY_TIMEOUT_SECONDS = 300;
+const VISIBILITY_TIMEOUT_SECONDS = 30;
 const VISIBILITY_HEARTBEAT_MS = 20_000;
 
 type WorkerBroker = Pick<
