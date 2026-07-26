@@ -1,7 +1,6 @@
 import { GetQueueUrlCommand, SendMessageCommand } from "@aws-sdk/client-sqs";
 import { SpanKind } from "@opentelemetry/api";
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
-import { getQueueNameForTelemetry } from "../../../src/config";
 import { Broker } from "../../../src/modules/broker/service";
 import type { EventHeaders } from "../../../src/modules/broker/types";
 import { sqsClient } from "../../../src/shared/aws";
@@ -14,6 +13,8 @@ import { mockProcessingJob } from "../../mocks/worker";
 
 const QUEUE_URL = "https://sqs.us-east-1.amazonaws.com/000000000000/completed";
 const INCOMING_TRACEPARENT = "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01";
+const REQUESTED_QUEUE_NAME = "fiapx-dev-video-processing-requested";
+const COMPLETED_QUEUE_NAME = "fiapx-dev-video-processing-completed";
 
 const sourceHeaders: EventHeaders = {
   eventId: "event-123",
@@ -45,6 +46,9 @@ function sentEnvelope() {
 }
 
 beforeEach(() => {
+  process.env.SQS_QUEUE_NAMES_VIDEO_PROCESSING_REQUESTED = REQUESTED_QUEUE_NAME;
+  process.env.SQS_QUEUE_NAMES_VIDEO_PROCESSING_COMPLETED = COMPLETED_QUEUE_NAME;
+
   telemetry = setupInMemoryTelemetry();
   spyOn(console, "log").mockImplementation(() => {});
 
@@ -55,6 +59,9 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  delete process.env.SQS_QUEUE_NAMES_VIDEO_PROCESSING_REQUESTED;
+  delete process.env.SQS_QUEUE_NAMES_VIDEO_PROCESSING_COMPLETED;
+
   await telemetry.dispose();
   mock.restore();
 });
@@ -81,12 +88,11 @@ describe("Broker.sendFrame", () => {
   test("opens a producer span tagged with video.id", async () => {
     await Broker.sendFrame(request);
 
-    const queueName = getQueueNameForTelemetry("VIDEO_PROCESSING_REQUESTED");
-    const span = telemetry.spanNamed(`${queueName} publish`);
+    const span = telemetry.spanNamed(`${REQUESTED_QUEUE_NAME} publish`);
 
     expect(span?.kind).toBe(SpanKind.PRODUCER);
     expect(span?.attributes["video.id"]).toBe("job-123");
-    expect(span?.attributes["messaging.destination.name"]).toBe(queueName);
+    expect(span?.attributes["messaging.destination.name"]).toBe(REQUESTED_QUEUE_NAME);
     expect(span?.ended).toBe(true);
   });
 
@@ -98,9 +104,7 @@ describe("Broker.sendFrame", () => {
 
     await expect(Broker.sendFrame(request)).rejects.toThrow("publish failed");
 
-    const queueName = getQueueNameForTelemetry("VIDEO_PROCESSING_REQUESTED");
-
-    expect(telemetry.spanNamed(`${queueName} publish`)?.ended).toBe(true);
+    expect(telemetry.spanNamed(`${REQUESTED_QUEUE_NAME} publish`)?.ended).toBe(true);
   });
 });
 
@@ -124,21 +128,19 @@ describe("Broker.sendProcessingCompleted", () => {
   test("opens a producer span tagged with video.id and the messaging attributes", async () => {
     await Broker.sendProcessingCompleted(payload, sourceHeaders);
 
-    const queueName = getQueueNameForTelemetry("VIDEO_PROCESSING_COMPLETED");
-    const span = telemetry.spanNamed(`${queueName} publish`);
+    const span = telemetry.spanNamed(`${COMPLETED_QUEUE_NAME} publish`);
 
     expect(span?.kind).toBe(SpanKind.PRODUCER);
     expect(span?.attributes["video.id"]).toBe(payload.processingJobId);
     expect(span?.attributes["messaging.system"]).toBe("aws_sqs");
-    expect(span?.attributes["messaging.destination.name"]).toBe(queueName);
+    expect(span?.attributes["messaging.destination.name"]).toBe(COMPLETED_QUEUE_NAME);
     expect(span?.ended).toBe(true);
   });
 
   test("stamps the envelope with the producer span", async () => {
     await Broker.sendProcessingCompleted(payload, sourceHeaders);
 
-    const queueName = getQueueNameForTelemetry("VIDEO_PROCESSING_COMPLETED");
-    const span = telemetry.spanNamed(`${queueName} publish`);
+    const span = telemetry.spanNamed(`${COMPLETED_QUEUE_NAME} publish`);
 
     expect(sentEnvelope().headers.traceparent).toBe(
       `00-${span?.spanContext().traceId}-${span?.spanContext().spanId}-01`,
@@ -153,8 +155,7 @@ describe("Broker.sendProcessingCompleted", () => {
     await withSpan(consumer, () => Broker.sendProcessingCompleted(payload, sourceHeaders));
     consumer.end();
 
-    const queueName = getQueueNameForTelemetry("VIDEO_PROCESSING_COMPLETED");
-    const producer = telemetry.spanNamed(`${queueName} publish`);
+    const producer = telemetry.spanNamed(`${COMPLETED_QUEUE_NAME} publish`);
 
     expect(producer?.spanContext().traceId).toBe("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
     expect(producer?.parentSpanContext?.spanId).toBe(consumer.spanContext().spanId);
@@ -173,8 +174,6 @@ describe("Broker.sendProcessingCompleted", () => {
       "publish failed",
     );
 
-    const queueName = getQueueNameForTelemetry("VIDEO_PROCESSING_COMPLETED");
-
-    expect(telemetry.spanNamed(`${queueName} publish`)?.ended).toBe(true);
+    expect(telemetry.spanNamed(`${COMPLETED_QUEUE_NAME} publish`)?.ended).toBe(true);
   });
 });
