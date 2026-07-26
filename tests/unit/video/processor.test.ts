@@ -105,15 +105,15 @@ describe("processVideo", () => {
     await processVideo(message);
 
     const puts = sentCommands(PutObjectCommand);
+    // `uploadFrames` fires the frames through `Promise.all`, so only the set that goes up is
+    // guaranteed, never the order. The zip is awaited afterwards, so it is always last.
+    const frames = puts.slice(0, -1);
 
-    expect(puts.slice(0, 2).map((put) => put.input.ContentType)).toEqual([
-      "image/jpeg",
-      "image/jpeg",
-    ]);
-    expect(puts.slice(0, 2).map((put) => put.input.Key)).toEqual([
+    expect(frames.map((put) => String(put.input.Key)).sort((a, b) => a.localeCompare(b))).toEqual([
       "frames/job-123/frame-000001.jpg",
       "frames/job-123/frame-000002.jpg",
     ]);
+    expect(frames.map((put) => put.input.ContentType)).toEqual(["image/jpeg", "image/jpeg"]);
     expect(puts.at(-1)?.input.ContentType).toBe("application/zip");
     expect(puts.at(-1)?.input.Key).toBe("frames/job-123/frames.zip");
   });

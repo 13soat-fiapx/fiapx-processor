@@ -8,6 +8,7 @@ import {
   startConsumerSpan,
   withSpan,
 } from "../../../src/shared/observability/message-tracing";
+import { resetQueueUrlCache } from "../../../src/shared/utils/queue-url-resolver";
 import { type InMemoryTelemetry, setupInMemoryTelemetry } from "../../mocks/observability";
 import { mockProcessingJob } from "../../mocks/worker";
 
@@ -48,6 +49,10 @@ function sentEnvelope() {
 beforeEach(() => {
   process.env.SQS_QUEUE_NAMES_VIDEO_PROCESSING_REQUESTED = REQUESTED_QUEUE_NAME;
   process.env.SQS_QUEUE_NAMES_VIDEO_PROCESSING_COMPLETED = COMPLETED_QUEUE_NAME;
+
+  // Same module-global memo as in consumer.test.ts: clear it so neither file depends on which
+  // one Bun happens to load first.
+  resetQueueUrlCache();
 
   telemetry = setupInMemoryTelemetry();
   spyOn(console, "log").mockImplementation(() => {});

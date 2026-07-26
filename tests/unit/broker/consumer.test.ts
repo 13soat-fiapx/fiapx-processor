@@ -7,6 +7,7 @@ import {
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { Broker } from "../../../src/modules/broker/service";
 import { sqsClient } from "../../../src/shared/aws";
+import { resetQueueUrlCache } from "../../../src/shared/utils/queue-url-resolver";
 
 const QUEUE_URL = "https://sqs.us-east-1.amazonaws.com/000000000000/requested";
 const REQUESTED_QUEUE_NAME = "fiapx-dev-video-processing-requested";
@@ -52,6 +53,11 @@ function sentCommand<T>(type: new (...args: never[]) => T): T | undefined {
 
 beforeEach(() => {
   process.env.SQS_QUEUE_NAMES_VIDEO_PROCESSING_REQUESTED = REQUESTED_QUEUE_NAME;
+
+  // The resolver memoizes queue URLs in a module-global Map and Bun runs the whole suite in one
+  // process, so without this the URL another file stubbed leaks in and the file order decides
+  // whether this one passes.
+  resetQueueUrlCache();
 
   spyOn(console, "log").mockImplementation(() => {});
   spyOn(console, "error").mockImplementation(() => {});
