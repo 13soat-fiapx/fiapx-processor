@@ -134,6 +134,14 @@ function spawnFfmpeg(videoPath: string, outputPattern: string) {
   }
 }
 
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === "/") {
+    end -= 1;
+  }
+  return value.slice(0, end);
+}
+
 async function uploadFrames(
   bucket: string,
   processingJobId: string,
@@ -141,8 +149,8 @@ async function uploadFrames(
   outputPrefix?: string,
 ) {
   const files = await readdir(framesDir);
-  const frameFiles = files.filter((file) => file.endsWith(".jpg")).sort();
-  const normalizedPrefix = outputPrefix?.replace(/\/+$/, "");
+  const frameFiles = files.filter((file) => file.endsWith(".jpg")).sort((a, b) => a.localeCompare(b));
+  const normalizedPrefix = outputPrefix ? stripTrailingSlashes(outputPrefix) : outputPrefix;
 
   await Promise.all(
     frameFiles.map(async (file) => {
@@ -166,7 +174,7 @@ async function uploadFramesZip(
   outputPrefix?: string,
 ): Promise<ProcessingJobResultFile> {
   const files = await readdir(framesDir);
-  const frameFiles = files.filter((file) => file.endsWith(".jpg")).sort();
+  const frameFiles = files.filter((file) => file.endsWith(".jpg")).sort((a, b) => a.localeCompare(b));
 
   if (frameFiles.length === 0) {
     throw new Error("No frames were extracted from the input video.");
@@ -178,7 +186,7 @@ async function uploadFramesZip(
   }
 
   const zip = zipSync(entries, { level: 6 });
-  const normalizedPrefix = outputPrefix?.replace(/\/+$/, "");
+  const normalizedPrefix = outputPrefix ? stripTrailingSlashes(outputPrefix) : outputPrefix;
   const key = normalizedPrefix
     ? `${normalizedPrefix}/frames.zip`
     : `${config.framePrefix}/${processingJobId}/frames.zip`;
