@@ -29,7 +29,9 @@ const message: VideoProcessingMessage = {
 let send: ReturnType<typeof spyOn<typeof s3Client, "send">>;
 
 function sentCommands<T>(type: new (...args: never[]) => T): T[] {
-  return send.mock.calls.map(([call]) => call).filter((call): call is T => call instanceof type);
+  return send.mock.calls
+    .map(([call]) => call as unknown)
+    .filter((call): call is T => call instanceof type);
 }
 
 /**
@@ -108,14 +110,15 @@ describe("processVideo", () => {
     // `uploadFrames` fires the frames through `Promise.all`, so only the set that goes up is
     // guaranteed, never the order. The zip is awaited afterwards, so it is always last.
     const frames = puts.slice(0, -1);
+    const zip = puts[puts.length - 1];
 
     expect(frames.map((put) => String(put.input.Key)).sort((a, b) => a.localeCompare(b))).toEqual([
       "frames/job-123/frame-000001.jpg",
       "frames/job-123/frame-000002.jpg",
     ]);
     expect(frames.map((put) => put.input.ContentType)).toEqual(["image/jpeg", "image/jpeg"]);
-    expect(puts.at(-1)?.input.ContentType).toBe("application/zip");
-    expect(puts.at(-1)?.input.Key).toBe("frames/job-123/frames.zip");
+    expect(zip?.input.ContentType).toBe("application/zip");
+    expect(zip?.input.Key).toBe("frames/job-123/frames.zip");
   });
 
   test("emits one span per processing phase, all tagged with video.id", async () => {

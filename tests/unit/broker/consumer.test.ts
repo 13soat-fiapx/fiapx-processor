@@ -48,7 +48,9 @@ function receivedMessage(body: string | undefined) {
 }
 
 function sentCommand<T>(type: new (...args: never[]) => T): T | undefined {
-  return send.mock.calls.map(([call]) => call).find((call): call is T => call instanceof type);
+  return send.mock.calls
+    .map(([call]) => call as unknown)
+    .find((call): call is T => call instanceof type);
 }
 
 beforeEach(() => {

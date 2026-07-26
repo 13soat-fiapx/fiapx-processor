@@ -3,6 +3,7 @@
   "version": "1.0.50",
   "scripts": {
     "test": "bun test tests",
+    "typecheck": "bun x tsc --noEmit",
     "test:unit": "bun test tests/unit",
     "test:integration": "bun test tests/integration",
     "test:coverage": "bun test tests --coverage",
