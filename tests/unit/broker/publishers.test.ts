@@ -8,6 +8,7 @@ import {
   startConsumerSpan,
   withSpan,
 } from "../../../src/shared/observability/message-tracing";
+import { resetQueueUrlCache } from "../../../src/shared/utils/queue-url-resolver";
 import { type InMemoryTelemetry, setupInMemoryTelemetry } from "../../mocks/observability";
 import { mockProcessingJob } from "../../mocks/worker";
 
@@ -36,18 +37,25 @@ const payload = {
 let telemetry: InMemoryTelemetry;
 let send: ReturnType<typeof spyOn<typeof sqsClient, "send">>;
 
+/** The SendMessageCommand handed to the SQS client, if any was sent. */
+function sentMessageCommand(): SendMessageCommand | undefined {
+  return send.mock.calls
+    .map(([call]) => call as unknown)
+    .find((call): call is SendMessageCommand => call instanceof SendMessageCommand);
+}
+
 /** Reads the envelope out of the SendMessageCommand handed to the SQS client. */
 function sentEnvelope() {
-  const command = send.mock.calls
-    .map(([call]) => call)
-    .find((call): call is SendMessageCommand => call instanceof SendMessageCommand);
-
-  return JSON.parse(String(command?.input.MessageBody));
+  return JSON.parse(String(sentMessageCommand()?.input.MessageBody));
 }
 
 beforeEach(() => {
   process.env.SQS_QUEUE_NAMES_VIDEO_PROCESSING_REQUESTED = REQUESTED_QUEUE_NAME;
   process.env.SQS_QUEUE_NAMES_VIDEO_PROCESSING_COMPLETED = COMPLETED_QUEUE_NAME;
+
+  // Same module-global memo as in consumer.test.ts: clear it so neither file depends on which
+  // one Bun happens to load first.
+  resetQueueUrlCache();
 
   telemetry = setupInMemoryTelemetry();
   spyOn(console, "log").mockImplementation(() => {});
@@ -117,12 +125,7 @@ describe("Broker.sendProcessingCompleted", () => {
     expect(envelope.headers.eventType).toBe("video.processing.completed");
     expect(envelope.headers.source).toBe("fiapx-processor");
     expect(envelope.payload).toEqual(payload);
-    expect(
-      send.mock.calls
-        .map(([call]) => call)
-        .find((call): call is SendMessageCommand => call instanceof SendMessageCommand)?.input
-        .QueueUrl,
-    ).toBe(QUEUE_URL);
+    expect(sentMessageCommand()?.input.QueueUrl).toBe(QUEUE_URL);
   });
 
   test("opens a producer span tagged with video.id and the messaging attributes", async () => {

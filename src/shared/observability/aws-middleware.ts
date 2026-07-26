@@ -18,6 +18,14 @@ export type InstrumentableClient = {
   };
 };
 
+/**
+ * What the generic constrains on. The concrete clients declare `add` as a set of overloads that
+ * is not assignable to the simplified signature above, so constraining directly on
+ * `InstrumentableClient` rejects every real client and collapses the return type to the
+ * constraint — which is why `s3Client.send` used to be reported as missing.
+ */
+type HasMiddlewareStack = { middlewareStack: { add: (...args: never[]) => void } };
+
 /** "SQSClient" -> "SQS", "DynamoDBClient" -> "DynamoDB" */
 export function toServiceName(clientName?: string) {
   return clientName?.replace(/Client$/, "") || "AWS";
@@ -32,8 +40,8 @@ export function toOperationName(commandName?: string) {
  * Replaces the HttpClient instrumentation used by the .NET services: it covers every SQS, S3,
  * DynamoDB and STS call without monkey-patching, which is what makes it viable under Bun.
  */
-export function instrumentAwsClient<T extends InstrumentableClient>(client: T): T {
-  client.middlewareStack.add(
+export function instrumentAwsClient<T extends HasMiddlewareStack>(client: T): T {
+  (client as unknown as InstrumentableClient).middlewareStack.add(
     (next, middlewareContext) => async (args) => {
       const service = toServiceName(middlewareContext.clientName);
       const operation = toOperationName(middlewareContext.commandName);

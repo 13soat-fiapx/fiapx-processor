@@ -37,7 +37,7 @@ async function captureResourceAttributes() {
 }
 
 describe("initObservability guard", () => {
-  test.each([
+  test.each<[string, Partial<typeof config>]>([
     ["the api key is empty", { datadogApiKey: "" }],
     ["the api key is blank", { datadogApiKey: "   " }],
     ["the OTLP endpoint is empty", { datadogApiKey: "key", datadogOtlpEndpoint: "" }],

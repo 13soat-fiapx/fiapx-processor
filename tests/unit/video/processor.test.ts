@@ -1,8 +1,15 @@
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  PutObjectCommand,
+} from "@aws-sdk/client-s3";
 import { SpanStatusCode } from "@opentelemetry/api";
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { VideoProcessingMessage } from "../../../src/modules/broker/types";
+import { processVideo } from "../../../src/modules/video/processor";
+import { s3Client } from "../../../src/shared/aws";
 import { type InMemoryTelemetry, setupInMemoryTelemetry } from "../../mocks/observability";
 
 const BUCKET = "fiapx-dev-artifacts-000000000000";
@@ -14,15 +21,18 @@ const message: VideoProcessingMessage = {
   outputPrefix: "frames/job-123/",
 };
 
-const downloadFromAwsS3 = mock(async () => Buffer.from("fake-video"));
-const uploadToAwsS3 = mock(async () => {});
-const deleteFromAwsS3 = mock(async () => {});
+/**
+ * S3 is faked at the client seam rather than by mocking `shared/utils/upload-to-aws`:
+ * `mock.module` registers process-globally with no unregister, so a module-level mock here
+ * leaks into `tests/unit/shared/utils/upload-to-aws.test.ts` and blanks out its spy.
+ */
+let send: ReturnType<typeof spyOn<typeof s3Client, "send">>;
 
-mock.module("../../../src/shared/utils/upload-to-aws", () => ({
-  downloadFromAwsS3,
-  uploadToAwsS3,
-  deleteFromAwsS3,
-}));
+function sentCommands<T>(type: new (...args: never[]) => T): T[] {
+  return send.mock.calls
+    .map(([call]) => call as unknown)
+    .filter((call): call is T => call instanceof type);
+}
 
 /**
  * Stands in for ffmpeg: writes `frameCount` JPEGs into the frames directory the real command
@@ -48,18 +58,18 @@ function stubFfmpeg(frameCount: number, exitCode = 0) {
 }
 
 let telemetry: InMemoryTelemetry;
-let processVideo: typeof import("../../../src/modules/video/processor").processVideo;
 
-beforeEach(async () => {
+beforeEach(() => {
   telemetry = setupInMemoryTelemetry();
   spyOn(console, "log").mockImplementation(() => {});
   spyOn(console, "error").mockImplementation(() => {});
 
-  downloadFromAwsS3.mockClear();
-  uploadToAwsS3.mockClear();
-  deleteFromAwsS3.mockClear();
-
-  ({ processVideo } = await import("../../../src/modules/video/processor"));
+  send = spyOn(s3Client, "send").mockImplementation((async (command: unknown) => {
+    if (command instanceof GetObjectCommand) {
+      return { Body: { transformToByteArray: async () => new Uint8Array([1, 2, 3]) } };
+    }
+    return {};
+  }) as typeof s3Client.send);
 });
 
 afterEach(async () => {
@@ -73,7 +83,10 @@ describe("processVideo", () => {
 
     const result = await processVideo(message);
 
-    expect(downloadFromAwsS3).toHaveBeenCalledWith(BUCKET, message.inputFile.key);
+    expect(sentCommands(GetObjectCommand)[0]?.input).toEqual({
+      Bucket: BUCKET,
+      Key: message.inputFile.key,
+    });
     expect(result.bucket).toBe(BUCKET);
     expect(result.key).toBe("frames/job-123/frames.zip");
     expect(result.region).toBe("us-east-1");
@@ -81,8 +94,31 @@ describe("processVideo", () => {
     expect(result.checksum).toMatch(/^[0-9a-f]{64}$/);
 
     // Three frames plus the zip.
-    expect(uploadToAwsS3).toHaveBeenCalledTimes(4);
-    expect(deleteFromAwsS3).toHaveBeenCalledWith(BUCKET, message.inputFile.key);
+    expect(sentCommands(PutObjectCommand)).toHaveLength(4);
+    expect(sentCommands(DeleteObjectCommand)[0]?.input).toEqual({
+      Bucket: BUCKET,
+      Key: message.inputFile.key,
+    });
+  });
+
+  test("uploads the frames as JPEG and the archive as ZIP", async () => {
+    stubFfmpeg(2);
+
+    await processVideo(message);
+
+    const puts = sentCommands(PutObjectCommand);
+    // `uploadFrames` fires the frames through `Promise.all`, so only the set that goes up is
+    // guaranteed, never the order. The zip is awaited afterwards, so it is always last.
+    const frames = puts.slice(0, -1);
+    const zip = puts[puts.length - 1];
+
+    expect(frames.map((put) => String(put.input.Key)).sort((a, b) => a.localeCompare(b))).toEqual([
+      "frames/job-123/frame-000001.jpg",
+      "frames/job-123/frame-000002.jpg",
+    ]);
+    expect(frames.map((put) => put.input.ContentType)).toEqual(["image/jpeg", "image/jpeg"]);
+    expect(zip?.input.ContentType).toBe("application/zip");
+    expect(zip?.input.Key).toBe("frames/job-123/frames.zip");
   });
 
   test("emits one span per processing phase, all tagged with video.id", async () => {
@@ -120,7 +156,7 @@ describe("processVideo", () => {
 
     expect(span?.status.code).toBe(SpanStatusCode.ERROR);
     expect(span?.events.map((event) => event.name)).toContain("exception");
-    expect(deleteFromAwsS3).not.toHaveBeenCalled();
+    expect(sentCommands(DeleteObjectCommand)).toBeEmpty();
   });
 
   test("fails when ffmpeg produced no frames", async () => {
@@ -139,5 +175,14 @@ describe("processVideo", () => {
     }) as unknown as typeof Bun.spawn);
 
     await expect(processVideo(message)).rejects.toThrow("ffmpeg executable not found");
+  });
+
+  // Only ENOENT gets translated; anything else has to reach the caller as thrown.
+  test("propagates a spawn failure that is not ENOENT unchanged", async () => {
+    spyOn(Bun, "spawn").mockImplementation((() => {
+      throw Object.assign(new Error("permission denied"), { code: "EACCES" });
+    }) as unknown as typeof Bun.spawn);
+
+    await expect(processVideo(message)).rejects.toThrow("permission denied");
   });
 });

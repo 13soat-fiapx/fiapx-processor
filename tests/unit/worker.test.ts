@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
-import { buildCompletedMessage, runWorker } from "../../src/worker";
+import { buildCompletedMessage, runWorker, startVisibilityHeartbeat } from "../../src/worker";
 import {
   createWorkerDependencies,
   createWorkerDependenciesWithPublishFailure,
@@ -53,6 +53,72 @@ describe("buildCompletedMessage", () => {
     expect(payload.status).toBe("failed");
     expect(payload.result).toBeUndefined();
     expect(payload.completedAt).toBe("2026-07-25T12:10:00.000Z");
+  });
+});
+
+describe("startVisibilityHeartbeat", () => {
+  const TICK_MS = 5;
+
+  /** Waits long enough for `ticks` heartbeat intervals to fire. */
+  function waitForTicks(ticks: number) {
+    return new Promise((resolve) => setTimeout(resolve, TICK_MS * ticks + TICK_MS));
+  }
+
+  test("keeps extending the message visibility while the job runs", async () => {
+    const extendVideoMessageVisibility = mock(async () => {});
+    const stop = startVisibilityHeartbeat(
+      "receipt-handle",
+      "message-123",
+      { extendVideoMessageVisibility } as never,
+      TICK_MS,
+    );
+
+    try {
+      await waitForTicks(2);
+    } finally {
+      stop();
+    }
+
+    expect(extendVideoMessageVisibility).toHaveBeenCalledWith("receipt-handle", 300);
+    expect(extendVideoMessageVisibility.mock.calls.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("stops extending once the returned closure is called", async () => {
+    const extendVideoMessageVisibility = mock(async () => {});
+    const stop = startVisibilityHeartbeat(
+      "receipt-handle",
+      "message-123",
+      { extendVideoMessageVisibility } as never,
+      TICK_MS,
+    );
+
+    await waitForTicks(2);
+    stop();
+    const afterStop = extendVideoMessageVisibility.mock.calls.length;
+    await waitForTicks(3);
+
+    expect(extendVideoMessageVisibility.mock.calls.length).toBe(afterStop);
+  });
+
+  // An expired receipt handle must not take the whole job down mid-processing.
+  test("swallows an extension failure instead of breaking processing", async () => {
+    const extendVideoMessageVisibility = mock(async () => {
+      throw new Error("ReceiptHandleIsInvalid");
+    });
+    const stop = startVisibilityHeartbeat(
+      "receipt-handle",
+      "message-123",
+      { extendVideoMessageVisibility } as never,
+      TICK_MS,
+    );
+
+    try {
+      await waitForTicks(2);
+    } finally {
+      stop();
+    }
+
+    expect(extendVideoMessageVisibility).toHaveBeenCalled();
   });
 });
 

@@ -18,14 +18,14 @@ type Handler = (args: unknown) => Promise<unknown>;
 function createFakeClient() {
   let registered: ((next: Handler, context: unknown) => Handler) | undefined;
 
-  const client: InstrumentableClient = {
+  const client: InstrumentableClient & { registeredOptions?: unknown } = {
     middlewareStack: {
       add: (middleware, options) => {
         registered = middleware as (next: Handler, context: unknown) => Handler;
         client.registeredOptions = options;
       },
     },
-  } as InstrumentableClient & { registeredOptions?: unknown };
+  };
 
   return {
     client,
