@@ -149,7 +149,7 @@ async function uploadFrames(
   outputPrefix?: string,
 ) {
   const files = await readdir(framesDir);
-  const frameFiles = files.filter((file) => file.endsWith(".jpg")).sort();
+  const frameFiles = files.filter((file) => file.endsWith(".jpg")).sort((a, b) => a.localeCompare(b));
   const normalizedPrefix = outputPrefix ? stripTrailingSlashes(outputPrefix) : outputPrefix;
 
   await Promise.all(
@@ -174,7 +174,7 @@ async function uploadFramesZip(
   outputPrefix?: string,
 ): Promise<ProcessingJobResultFile> {
   const files = await readdir(framesDir);
-  const frameFiles = files.filter((file) => file.endsWith(".jpg")).sort();
+  const frameFiles = files.filter((file) => file.endsWith(".jpg")).sort((a, b) => a.localeCompare(b));
 
   if (frameFiles.length === 0) {
     throw new Error("No frames were extracted from the input video.");
