@@ -79,7 +79,7 @@ describe("startVisibilityHeartbeat", () => {
       stop();
     }
 
-    expect(extendVideoMessageVisibility).toHaveBeenCalledWith("receipt-handle", 300);
+    expect(extendVideoMessageVisibility).toHaveBeenCalledWith("receipt-handle", 30);
     expect(extendVideoMessageVisibility.mock.calls.length).toBeGreaterThanOrEqual(1);
   });
 
