@@ -52,7 +52,10 @@ export function initObservability() {
   }
 
   const apiKey = config.datadogApiKey.trim();
-  const endpoint = config.datadogOtlpEndpoint.trim().replace(/\/+$/, "");
+  let endpoint = config.datadogOtlpEndpoint.trim();
+  while (endpoint.endsWith("/")) {
+    endpoint = endpoint.slice(0, -1);
+  }
 
   if (!apiKey || !endpoint) {
     console.log("Datadog observability disabled: api key or OTLP endpoint not configured");
