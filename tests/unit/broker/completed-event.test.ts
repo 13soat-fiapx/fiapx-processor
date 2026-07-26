@@ -55,7 +55,9 @@ describe("buildVideoProcessingCompletedEvent with observability enabled", () => 
   });
 });
 
-describe("buildVideoProcessingCompletedEvent with observability disabled", () => {
+// No SDK is registered in this block, which is also what the guard produces when DD_API_KEY is
+// absent: `propagation.inject` writes nothing and the copy fallback has to carry the envelope.
+describe("buildVideoProcessingCompletedEvent without an active span", () => {
   test("copies the incoming traceparent when no SDK is registered", () => {
     const event = buildVideoProcessingCompletedEvent(payload, sourceHeaders);
 
