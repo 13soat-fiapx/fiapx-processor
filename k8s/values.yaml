@@ -23,5 +23,11 @@ bucket:
   prefix: "artifacts"
   framePrefix: "frames"
 
+datadog:
+  otlpEndpoint: "https://otlp.us5.datadoghq.com"
+
+job:
+  terminationGracePeriodSeconds: 30
+
 secrets:
   clusterSecretStore: fiapx-aws-secrets

@@ -132,7 +132,7 @@ describe("runWorker", () => {
   test("does not delete the SQS message if publishing completion fails after the job succeeds", async () => {
     const dependencies = createWorkerDependenciesWithPublishFailure();
 
-    expect(runWorker(dependencies)).rejects.toThrow("publish failed");
+    await expect(runWorker(dependencies)).rejects.toThrow("publish failed");
 
     expect(dependencies.processingJobService.updateStatus).toHaveBeenNthCalledWith(2, {
       processingJobId: "job-123",

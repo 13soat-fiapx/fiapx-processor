@@ -5,7 +5,14 @@ import {
   SendMessageCommand,
 } from "@aws-sdk/client-sqs";
 import { randomBytes, randomUUID } from "node:crypto";
+import { getQueueNameForTelemetry } from "../../config";
 import { sqsClient } from "../../shared/aws";
+import { logger } from "../../shared/observability/logger";
+import {
+  currentTraceparent,
+  startProducerSpan,
+  withSpan,
+} from "../../shared/observability/message-tracing";
 import { resolveQueueUrl } from "../../shared/utils/queue-url-resolver";
 import type { BrokerModel } from "./model";
 import type {
@@ -71,7 +78,16 @@ function buildVideoProcessingEvent(payload: VideoProcessingMessage): VideoProces
   };
 }
 
-function buildVideoProcessingCompletedEvent(
+/**
+ * Three-level fallback, in order:
+ *
+ * 1. inject the active context — gives the notifier the processor's span as parent, which is
+ *    the correct W3C waterfall and what the .NET publisher does;
+ * 2. copy the incoming header — with observability disabled there is no SDK registered and
+ *    `inject` writes nothing, so without this the envelope would ship with no traceparent;
+ * 3. generate a fresh one — no active span and no incoming header.
+ */
+export function buildVideoProcessingCompletedEvent(
   payload: VideoProcessingCompletedMessage,
   sourceHeaders?: EventHeaders,
 ): VideoProcessingCompletedEvent {
@@ -82,7 +98,7 @@ function buildVideoProcessingCompletedEvent(
       eventId: randomUUID(),
       eventType: "video.processing.completed",
       eventVersion: "1.0",
-      traceparent: sourceHeaders?.traceparent ?? createTraceparent(),
+      traceparent: currentTraceparent() ?? sourceHeaders?.traceparent ?? createTraceparent(),
       tracestate: sourceHeaders?.tracestate,
       baggage: sourceHeaders?.baggage,
       occurredAt,
@@ -95,16 +111,25 @@ function buildVideoProcessingCompletedEvent(
 export abstract class Broker {
   static async sendFrame(payload: BrokerModel["brokerRequest"]) {
     const queueUrl = await resolveQueueUrl("VIDEO_PROCESSING_REQUESTED");
-    const event = buildVideoProcessingEvent(payload);
+    const span = startProducerSpan(getQueueNameForTelemetry("VIDEO_PROCESSING_REQUESTED"));
+    span.setAttribute("video.id", payload.processingJobId);
 
-    await sqsClient.send(
-      new SendMessageCommand({
-        QueueUrl: queueUrl,
-        MessageBody: JSON.stringify(event),
-      }),
-    );
+    try {
+      await withSpan(span, async () => {
+        const event = buildVideoProcessingEvent(payload);
 
-    console.log(
+        await sqsClient.send(
+          new SendMessageCommand({
+            QueueUrl: queueUrl,
+            MessageBody: JSON.stringify(event),
+          }),
+        );
+      });
+    } finally {
+      span.end();
+    }
+
+    logger.info(
       {
         processingJobId: payload.processingJobId,
         userId: payload.userId,
@@ -118,16 +143,26 @@ export abstract class Broker {
     sourceHeaders?: EventHeaders,
   ) {
     const queueUrl = await resolveQueueUrl("VIDEO_PROCESSING_COMPLETED");
-    const event = buildVideoProcessingCompletedEvent(payload, sourceHeaders);
+    const span = startProducerSpan(getQueueNameForTelemetry("VIDEO_PROCESSING_COMPLETED"));
+    span.setAttribute("video.id", payload.processingJobId);
 
-    await sqsClient.send(
-      new SendMessageCommand({
-        QueueUrl: queueUrl,
-        MessageBody: JSON.stringify(event),
-      }),
-    );
+    try {
+      // The event is built inside the span so the injected traceparent points at it.
+      await withSpan(span, async () => {
+        const event = buildVideoProcessingCompletedEvent(payload, sourceHeaders);
 
-    console.log(
+        await sqsClient.send(
+          new SendMessageCommand({
+            QueueUrl: queueUrl,
+            MessageBody: JSON.stringify(event),
+          }),
+        );
+      });
+    } finally {
+      span.end();
+    }
+
+    logger.info(
       {
         processingJobId: payload.processingJobId,
         userId: payload.user.id,
