@@ -3,6 +3,11 @@ import { stsClient } from "../aws";
 
 let cachedBucketName: string | undefined;
 
+/** Drops the memoized bucket name so each test starts from a cold cache. */
+export function resetBucketNameCache() {
+  cachedBucketName = undefined;
+}
+
 export async function resolveBucketName(prefix: string): Promise<string> {
   if (cachedBucketName) return cachedBucketName;
 

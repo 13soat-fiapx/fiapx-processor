@@ -38,6 +38,7 @@ export function startVisibilityHeartbeat(
   receiptHandle: string,
   messageId?: string,
   broker: WorkerBroker = Broker,
+  intervalMs: number = VISIBILITY_HEARTBEAT_MS,
 ) {
   const interval = setInterval(async () => {
     try {
@@ -46,7 +47,7 @@ export function startVisibilityHeartbeat(
     } catch (error) {
       logger.error({ error, messageId }, "failed to extend SQS message visibility");
     }
-  }, VISIBILITY_HEARTBEAT_MS);
+  }, intervalMs);
 
   return () => clearInterval(interval);
 }
