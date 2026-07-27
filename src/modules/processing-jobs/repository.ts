@@ -177,6 +177,7 @@ export abstract class ProcessingJobRepository {
     status: ProcessingJobStatus;
     resultFile?: ProcessingJobResultFile;
     errorMessage?: string;
+    errorCode?: string;
   }): Promise<ProcessingJob> {
     const now = new Date().toISOString();
     const expressionAttributeNames: Record<string, string> = {
@@ -240,7 +241,8 @@ export abstract class ProcessingJobRepository {
       expressionAttributeValues[":completedAt"] = { S: now };
       updateExpressions.push("#completedAt = :completedAt");
       messages.push(buildProcessingMessage({
-        ...processingMessages.failed,
+        code: input.errorCode ?? processingMessages.failed.code,
+        severity: processingMessages.failed.severity,
         message: input.errorMessage ?? "Video processing failed.",
       }));
     }

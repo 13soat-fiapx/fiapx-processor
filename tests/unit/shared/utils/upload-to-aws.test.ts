@@ -1,6 +1,7 @@
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   PutObjectCommand,
 } from "@aws-sdk/client-s3";
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
@@ -8,6 +9,7 @@ import { s3Client } from "../../../../src/shared/aws";
 import {
   deleteFromAwsS3,
   downloadFromAwsS3,
+  getObjectSize,
   uploadToAwsS3,
 } from "../../../../src/shared/utils/upload-to-aws";
 
@@ -49,6 +51,21 @@ describe("downloadFromAwsS3", () => {
     respondWith({});
 
     await expect(downloadFromAwsS3(BUCKET, KEY)).rejects.toThrow("S3 object body is empty");
+  });
+});
+
+describe("getObjectSize", () => {
+  test("returns the object's Content-Length", async () => {
+    respondWith({ ContentLength: 12345 });
+
+    expect(await getObjectSize(BUCKET, KEY)).toBe(12345);
+    expect(sentCommand(HeadObjectCommand)?.input).toEqual({ Bucket: BUCKET, Key: KEY });
+  });
+
+  test("defaults to 0 when Content-Length is missing", async () => {
+    respondWith({});
+
+    expect(await getObjectSize(BUCKET, KEY)).toBe(0);
   });
 });
 

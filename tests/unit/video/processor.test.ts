@@ -1,14 +1,20 @@
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   PutObjectCommand,
 } from "@aws-sdk/client-s3";
 import { SpanStatusCode } from "@opentelemetry/api";
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { config } from "../../../src/config";
 import type { VideoProcessingMessage } from "../../../src/modules/broker/types";
-import { processVideo } from "../../../src/modules/video/processor";
+import {
+  FileSizeExceededError,
+  processVideo,
+  VideoDurationExceededError,
+} from "../../../src/modules/video/processor";
 import { s3Client } from "../../../src/shared/aws";
 import { type InMemoryTelemetry, setupInMemoryTelemetry } from "../../mocks/observability";
 
@@ -35,11 +41,29 @@ function sentCommands<T>(type: new (...args: never[]) => T): T[] {
 }
 
 /**
- * Stands in for ffmpeg: writes `frameCount` JPEGs into the frames directory the real command
- * would have written to, derived from the output pattern in the argv.
+ * Fakes ffprobe's process shape: prints a duration (well under the default limit unless
+ * overridden) to stdout, the way `ffprobe -show_entries format=duration` does.
+ */
+function fakeFfprobeProcess(durationSeconds = 5, exitCode = 0) {
+  return {
+    exited: Promise.resolve(exitCode),
+    stdout: new Response(String(durationSeconds)).body,
+    stderr: new Response("ffprobe boom").body,
+  };
+}
+
+/**
+ * Stands in for both ffmpeg and ffprobe: writes `frameCount` JPEGs into the frames directory the
+ * real ffmpeg command would have written to (derived from the output pattern in the argv), and
+ * answers any ffprobe call with a duration under the default limit so `video.validate_duration`
+ * always passes unless a test overrides `Bun.spawn` itself.
  */
 function stubFfmpeg(frameCount: number, exitCode = 0) {
   return spyOn(Bun, "spawn").mockImplementation(((argv: string[]) => {
+    if (argv[0] === config.ffprobePath) {
+      return fakeFfprobeProcess();
+    }
+
     const framesDir = dirname(argv[5] as string);
 
     const exited = (async () => {
@@ -65,6 +89,9 @@ beforeEach(() => {
   spyOn(console, "error").mockImplementation(() => {});
 
   send = spyOn(s3Client, "send").mockImplementation((async (command: unknown) => {
+    if (command instanceof HeadObjectCommand) {
+      return { ContentLength: 3 };
+    }
     if (command instanceof GetObjectCommand) {
       return { Body: { transformToByteArray: async () => new Uint8Array([1, 2, 3]) } };
     }
@@ -169,8 +196,19 @@ describe("processVideo", () => {
     expect(telemetry.spanNamed("video.zip_upload")?.status.code).toBe(SpanStatusCode.ERROR);
   });
 
-  test("explains how to fix a missing ffmpeg executable", async () => {
+  // ffprobe runs before ffmpeg (duration is validated before extraction), so a spawn that always
+  // throws ENOENT surfaces as the ffprobe error first.
+  test("explains how to fix a missing ffprobe executable", async () => {
     spyOn(Bun, "spawn").mockImplementation((() => {
+      throw Object.assign(new Error("spawn failed"), { code: "ENOENT" });
+    }) as unknown as typeof Bun.spawn);
+
+    await expect(processVideo(message)).rejects.toThrow("ffprobe executable not found");
+  });
+
+  test("explains how to fix a missing ffmpeg executable", async () => {
+    spyOn(Bun, "spawn").mockImplementation(((argv: string[]) => {
+      if (argv[0] === config.ffprobePath) return fakeFfprobeProcess();
       throw Object.assign(new Error("spawn failed"), { code: "ENOENT" });
     }) as unknown as typeof Bun.spawn);
 
@@ -184,5 +222,63 @@ describe("processVideo", () => {
     }) as unknown as typeof Bun.spawn);
 
     await expect(processVideo(message)).rejects.toThrow("permission denied");
+  });
+
+  test("fails before downloading when the object's declared size exceeds the configured limit", async () => {
+    send.mockImplementation((async (command: unknown) => {
+      if (command instanceof HeadObjectCommand) {
+        return { ContentLength: config.maxFileSizeBytes + 1 };
+      }
+      return {};
+    }) as typeof s3Client.send);
+
+    await expect(processVideo(message)).rejects.toThrow(FileSizeExceededError);
+
+    const span = telemetry.spanNamed("video.download");
+
+    expect(span?.status.code).toBe(SpanStatusCode.ERROR);
+    // The whole point of checking Content-Length first is to never buffer an oversized file.
+    expect(sentCommands(GetObjectCommand)).toBeEmpty();
+    expect(sentCommands(PutObjectCommand)).toBeEmpty();
+    expect(sentCommands(DeleteObjectCommand)).toBeEmpty();
+  });
+
+  test("falls back to rejecting on the actual bytes when Content-Length understates the size", async () => {
+    send.mockImplementation((async (command: unknown) => {
+      if (command instanceof HeadObjectCommand) {
+        return { ContentLength: 3 };
+      }
+      if (command instanceof GetObjectCommand) {
+        return {
+          Body: {
+            transformToByteArray: async () =>
+              ({ byteLength: config.maxFileSizeBytes + 1 }) as unknown as Uint8Array,
+          },
+        };
+      }
+      return {};
+    }) as typeof s3Client.send);
+
+    await expect(processVideo(message)).rejects.toThrow(FileSizeExceededError);
+
+    expect(sentCommands(PutObjectCommand)).toBeEmpty();
+    expect(sentCommands(DeleteObjectCommand)).toBeEmpty();
+  });
+
+  test("fails when the video duration exceeds the configured limit", async () => {
+    spyOn(Bun, "spawn").mockImplementation(((argv: string[]) => {
+      if (argv[0] === config.ffprobePath) {
+        return fakeFfprobeProcess(config.maxVideoDurationSeconds + 1);
+      }
+      throw new Error("ffmpeg must not run once duration validation has failed");
+    }) as unknown as typeof Bun.spawn);
+
+    await expect(processVideo(message)).rejects.toThrow(VideoDurationExceededError);
+
+    const span = telemetry.spanNamed("video.validate_duration");
+
+    expect(span?.status.code).toBe(SpanStatusCode.ERROR);
+    expect(sentCommands(PutObjectCommand)).toBeEmpty();
+    expect(sentCommands(DeleteObjectCommand)).toBeEmpty();
   });
 });

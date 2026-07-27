@@ -4,7 +4,7 @@ import { Broker } from "./modules/broker/service";
 import type { VideoProcessingCompletedMessage } from "./modules/broker/types";
 import { ProcessingJobService } from "./modules/processing-jobs/service";
 import type { ProcessingJob, ProcessingJobResultFile } from "./modules/processing-jobs/types";
-import { processVideo } from "./modules/video/processor";
+import { ProcessingLimitExceededError, processVideo } from "./modules/video/processor";
 import { initObservability, shutdownObservability } from "./shared/observability";
 import { AppMetrics, type ProcessingStatus } from "./shared/observability/app-metrics";
 import { logger } from "./shared/observability/logger";
@@ -157,6 +157,7 @@ export async function runWorker(dependencies: WorkerDependencies = defaultDepend
           processingJobId: message.body.processingJobId,
           status: "failed",
           errorMessage: error instanceof Error ? error.message : String(error),
+          ...(error instanceof ProcessingLimitExceededError ? { errorCode: error.code } : {}),
         });
 
         await broker.sendProcessingCompleted(

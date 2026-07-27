@@ -26,6 +26,7 @@ export abstract class ProcessingJobService {
     status: ProcessingJobStatus;
     resultFile?: ProcessingJobResultFile;
     errorMessage?: string;
+    errorCode?: string;
   }) {
     return await ProcessingJobRepository.updateStatus(input);
   }

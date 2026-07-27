@@ -1,6 +1,7 @@
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   type GetObjectCommandOutput,
 } from "@aws-sdk/client-s3";
@@ -12,6 +13,12 @@ async function bodyToArrayBuffer(body: GetObjectCommandOutput["Body"]) {
   }
 
   return await body.transformToByteArray();
+}
+
+export async function getObjectSize(bucket: string, key: string): Promise<number> {
+  const response = await s3Client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+
+  return response.ContentLength ?? 0;
 }
 
 export async function downloadFromAwsS3(bucket: string, key: string) {

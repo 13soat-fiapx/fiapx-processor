@@ -5,6 +5,7 @@ metadata:
   name: {{ .Values.app.name }}
 
 spec:
+  maxReplicaCount: {{ .Values.limits.maxParallelJobs | int64 }}
   jobTargetRef:
     template:
       spec:
@@ -12,6 +13,14 @@ spec:
           - name: {{ .Values.app.name }}
             image: {{ .Values.image.repository | required "Parameter image.repository is required." }}:{{ .Values.image.tag }}
             imagePullPolicy: Always
+
+            resources:
+              requests:
+                cpu: {{ .Values.job.resources.requests.cpu | quote }}
+                memory: {{ .Values.job.resources.requests.memory | quote }}
+              limits:
+                cpu: {{ .Values.job.resources.limits.cpu | quote }}
+                memory: {{ .Values.job.resources.limits.memory | quote }}
 
             envFrom:
               - configMapRef:
@@ -33,8 +42,6 @@ spec:
                   secretKeyRef:
                     name: {{ .Values.app.name }}-aws
                     key: session-token
-              # optional: the mirror exists from install but has no key until Reflector syncs
-              # it. Without optional the pod would hang in CreateContainerConfigError.
               - name: DD_API_KEY
                 valueFrom:
                   secretKeyRef:
@@ -43,7 +50,6 @@ spec:
                     optional: true
 
         restartPolicy: Never
-        # Room for the telemetry flush before the Job is killed.
         terminationGracePeriodSeconds: {{ .Values.job.terminationGracePeriodSeconds }}
 
   triggers:
