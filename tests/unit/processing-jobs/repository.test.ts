@@ -369,6 +369,17 @@ describe("ProcessingJobRepository.updateStatus", () => {
     expect(appendedMessages()[0]?.Message).toEqual({ S: "Video processing failed." });
   });
 
+  test("logs the caller's errorCode instead of the generic PROC-9000 when given one", async () => {
+    await ProcessingJobRepository.updateStatus({
+      processingJobId: JOB_ID,
+      status: "failed",
+      errorCode: "PROC-9001",
+      errorMessage: "Video duration 700s exceeds the 600s limit.",
+    });
+
+    expect(appendedMessages()[0]?.Code).toEqual({ S: "PROC-9001" });
+  });
+
   // `queued` and `upload_pending` take none of the three branches, so nothing is appended.
   test("appends no message for a status without a branch", async () => {
     await ProcessingJobRepository.updateStatus({ processingJobId: JOB_ID, status: "queued" });

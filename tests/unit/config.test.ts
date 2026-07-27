@@ -4,6 +4,7 @@ import {
   envOrDefault,
   getQueueName,
   getQueueNameForTelemetry,
+  numberOrDefault,
 } from "../../src/config";
 
 describe("envOrDefault", () => {
@@ -23,6 +24,22 @@ describe("envOrDefault", () => {
   });
 });
 
+describe("numberOrDefault", () => {
+  test("returns the parsed number when the value is numeric", () => {
+    expect(numberOrDefault("600", 10)).toBe(600);
+    expect(numberOrDefault("  500000000  ", 10)).toBe(500_000_000);
+  });
+
+  test.each([
+    ["undefined", undefined],
+    ["empty", ""],
+    ["blank", "   "],
+    ["non-numeric", "abc"],
+  ])("falls back when the value is %s", (_label, value) => {
+    expect(numberOrDefault(value, 42)).toBe(42);
+  });
+});
+
 describe("observability config", () => {
   test("exposes a usable service identity regardless of the environment", () => {
     expect(config.appName).toBeTruthy();
@@ -34,6 +51,15 @@ describe("observability config", () => {
 
   test("defaults the api key to an empty string so the guard can trip", () => {
     expect(typeof config.datadogApiKey).toBe("string");
+  });
+});
+
+describe("operational limits config", () => {
+  test("defaults to the values calibrated for this deployment's cluster", () => {
+    expect(config.maxVideoDurationSeconds).toBe(600);
+    // 314572800 bytes = 300 MiB (binary units, not decimal — matches what the OS shows).
+    expect(config.maxFileSizeBytes).toBe(314_572_800);
+    expect(config.ffprobePath).toBeTruthy();
   });
 });
 

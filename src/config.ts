@@ -7,6 +7,11 @@ export function envOrDefault(value: string | undefined, fallback: string): strin
   return value?.trim() || fallback;
 }
 
+export function numberOrDefault(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return value?.trim() && Number.isFinite(parsed) ? parsed : fallback;
+}
+
 export const config = {
   awsRegion: process.env.AWS_REGION ?? "us-east-1",
   awsEndpoint: process.env.AWS_ENDPOINT,
@@ -14,6 +19,9 @@ export const config = {
   s3BucketPrefix: process.env.S3_BUCKET_PREFIX ?? "fiapx-dev-artifacts",
   framePrefix: process.env.FRAME_PREFIX ?? "frames",
   ffmpegPath: process.env.FFMPEG_PATH ?? "ffmpeg",
+  ffprobePath: process.env.FFPROBE_PATH ?? "ffprobe",
+  maxVideoDurationSeconds: numberOrDefault(process.env.MAX_VIDEO_DURATION_SECONDS, 600),
+  maxFileSizeBytes: numberOrDefault(process.env.MAX_FILE_SIZE_BYTES, 314_572_800),
   appName: envOrDefault(process.env.APP_NAME, "processor"),
   appVersion: envOrDefault(process.env.APP_VERSION, "1.0.0"),
   environment: envOrDefault(process.env.APP_ENV, "development").toLowerCase(),

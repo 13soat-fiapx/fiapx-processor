@@ -70,5 +70,9 @@ jobs:
     with:
       environment: ${{ needs.resolve-environment.outputs.environment }}
       service-name: ${{ vars.SERVICE_NAME }}
-      additional-args: "--set queue.url=${{ needs.resolve-queue-url.outputs.queue-url }}"
+      additional-args: >-
+        --set queue.url=${{ needs.resolve-queue-url.outputs.queue-url }}
+        --set limits.maxVideoDurationSeconds=${{ vars.MAX_VIDEO_DURATION_SECONDS || 600 }}
+        --set limits.maxFileSizeBytes=${{ vars.MAX_FILE_SIZE_BYTES || 314572800 }}
+        --set limits.maxParallelJobs=${{ vars.MAX_PARALLEL_JOBS || 3 }}
     secrets: inherit

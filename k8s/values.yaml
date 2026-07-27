@@ -28,6 +28,19 @@ datadog:
 
 job:
   terminationGracePeriodSeconds: 30
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "384Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1024Mi"
+
+limits:
+  maxVideoDurationSeconds: 600
+  # 314572800 bytes = 300 MiB (binário, não decimal)
+  maxFileSizeBytes: 314572800
+  maxParallelJobs: 3
 
 secrets:
   clusterSecretStore: fiapx-aws-secrets

@@ -12,10 +12,29 @@ import { resolveBucketName } from "../../shared/utils/bucket-name-resolver";
 import {
   deleteFromAwsS3,
   downloadFromAwsS3,
+  getObjectSize,
   uploadToAwsS3,
 } from "../../shared/utils/upload-to-aws";
 import type { VideoProcessingMessage } from "../broker/types";
 import type { ProcessingJobResultFile } from "../processing-jobs/types";
+
+export abstract class ProcessingLimitExceededError extends Error {
+  abstract readonly code: string;
+}
+
+export class FileSizeExceededError extends ProcessingLimitExceededError {
+  readonly code = "PROC-9002";
+  constructor(sizeBytes: number, limitBytes: number) {
+    super(`Video file size ${sizeBytes} bytes exceeds the ${limitBytes} bytes limit.`);
+  }
+}
+
+export class VideoDurationExceededError extends ProcessingLimitExceededError {
+  readonly code = "PROC-9001";
+  constructor(durationSeconds: number, limitSeconds: number) {
+    super(`Video duration ${durationSeconds}s exceeds the ${limitSeconds}s limit.`);
+  }
+}
 
 export async function processVideo(message: VideoProcessingMessage): Promise<ProcessingJobResultFile> {
   const bucket = message.inputFile.bucket ?? await resolveBucketName(config.s3BucketPrefix);
@@ -30,6 +49,12 @@ export async function processVideo(message: VideoProcessingMessage): Promise<Pro
 
   try {
     await traceStep("video.download", spanAttributes, async () => {
+      const sizeBytes = await getObjectSize(bucket, message.inputFile.key);
+
+      if (sizeBytes > config.maxFileSizeBytes) {
+        throw new FileSizeExceededError(sizeBytes, config.maxFileSizeBytes);
+      }
+
       logger.info(
         {
           bucket,
@@ -39,7 +64,22 @@ export async function processVideo(message: VideoProcessingMessage): Promise<Pro
         "start downloading input video from S3",
       );
       const video = await downloadFromAwsS3(bucket, message.inputFile.key);
+
+      // Safety net for a mismatched Content-Length, not the primary guard: the check above
+      // already keeps oversized files from being downloaded at all.
+      if (video.byteLength > config.maxFileSizeBytes) {
+        throw new FileSizeExceededError(video.byteLength, config.maxFileSizeBytes);
+      }
+
       await writeFile(videoPath, video);
+    });
+
+    await traceStep("video.validate_duration", spanAttributes, async () => {
+      const durationSeconds = await probeDurationSeconds(videoPath);
+
+      if (durationSeconds > config.maxVideoDurationSeconds) {
+        throw new VideoDurationExceededError(durationSeconds, config.maxVideoDurationSeconds);
+      }
     });
 
     await traceStep("video.extract_frames", spanAttributes, () =>
@@ -127,6 +167,52 @@ function spawnFfmpeg(videoPath: string, outputPattern: string) {
     if (code === "ENOENT") {
       throw new Error(
         `ffmpeg executable not found: ${config.ffmpegPath}. Install ffmpeg or set FFMPEG_PATH to the executable path.`,
+      );
+    }
+
+    throw error;
+  }
+}
+
+async function probeDurationSeconds(videoPath: string): Promise<number> {
+  const proc = spawnFfprobe(videoPath);
+
+  const [stdout, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    proc.exited,
+  ]);
+
+  if (exitCode !== 0) {
+    const error = await new Response(proc.stderr).text();
+    throw new Error(`ffprobe failed with exit code ${exitCode}: ${error}`);
+  }
+
+  return Number.parseFloat(stdout);
+}
+
+function spawnFfprobe(videoPath: string) {
+  try {
+    return Bun.spawn(
+      [
+        config.ffprobePath,
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        videoPath,
+      ],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error
+      ? error.code
+      : undefined;
+
+    if (code === "ENOENT") {
+      throw new Error(
+        `ffprobe executable not found: ${config.ffprobePath}. Install ffmpeg (which bundles ffprobe) or set FFPROBE_PATH to the executable path.`,
       );
     }
 

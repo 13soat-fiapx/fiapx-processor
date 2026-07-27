@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { VideoDurationExceededError } from "../../src/modules/video/processor";
 import { buildCompletedMessage, runWorker, startVisibilityHeartbeat } from "../../src/worker";
 import {
   createWorkerDependencies,
@@ -193,6 +194,22 @@ describe("runWorker", () => {
       mockQueueMessage.headers,
     );
     expect(dependencies.broker.deleteVideoMessage).toHaveBeenCalledWith("receipt-handle");
+  });
+
+  test("carries the error code through to updateStatus when a processing limit is exceeded", async () => {
+    const processVideo = mock(async () => {
+      throw new VideoDurationExceededError(700, 600);
+    });
+    const dependencies = createWorkerDependencies({ processVideo });
+
+    await runWorker(dependencies);
+
+    expect(dependencies.processingJobService.updateStatus).toHaveBeenNthCalledWith(2, {
+      processingJobId: "job-123",
+      status: "failed",
+      errorMessage: "Video duration 700s exceeds the 600s limit.",
+      errorCode: "PROC-9001",
+    });
   });
 
   test("does not delete the SQS message if publishing completion fails after the job succeeds", async () => {

@@ -18,3 +18,5 @@ data:
   APP_NAME: {{ .Values.app.name | quote }}
   APP_VERSION: {{ .Values.app.version | quote }}
   DD_OTLP_ENDPOINT: {{ .Values.datadog.otlpEndpoint | quote }}
+  MAX_VIDEO_DURATION_SECONDS: {{ .Values.limits.maxVideoDurationSeconds | int64 | quote }}
+  MAX_FILE_SIZE_BYTES: {{ .Values.limits.maxFileSizeBytes | int64 | quote }}
