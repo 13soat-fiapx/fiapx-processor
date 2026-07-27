@@ -64,6 +64,7 @@ jobs:
   deploy:
     name: Deploy Helm
     needs:
+      - tests
       - resolve-environment
       - resolve-queue-url
     uses: 13soat-fiapx/fiapx-infra/.github/workflows/deploy-helm.yml@main
